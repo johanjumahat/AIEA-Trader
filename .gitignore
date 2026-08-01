@@ -1,0 +1,26 @@
+# MQL5 compiled files
+*.ex5
+*.ex4
+
+# Build artifacts
+build/
+*.obj
+*.pdb
+
+# MT5 terminal data (local)
+MQL5/Files/
+
+# IDE / Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
