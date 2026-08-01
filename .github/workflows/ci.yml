@@ -1,0 +1,87 @@
+name: AIEA Trader CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate MQL5 file structure
+        run: |
+          echo "Checking MQL5 source files..."
+          FILES=(
+            "MQL5/Experts/AIEA_Trader.mq5"
+            "MQL5/Include/AIEA/Config.mqh"
+            "MQL5/Include/AIEA/IndicatorEngine.mqh"
+            "MQL5/Include/AIEA/RiskManager.mqh"
+            "MQL5/Include/AIEA/TradingJournal.mqh"
+            "MQL5/Include/AIEA/LearningEngine.mqh"
+            "MQL5/Include/AIEA/PatternRecognition.mqh"
+            "MQL5/Include/AIEA/StrategyEvolution.mqh"
+            "MQL5/Include/AIEA/OptimizationEngine.mqh"
+            "MQL5/Include/AIEA/ReportGenerator.mqh"
+            "MQL5/Include/AIEA/Dashboard.mqh"
+            "Tests/AIEA_TestSuite.mq5"
+          )
+          for f in "${FILES[@]}"; do
+            if [ ! -f "$f" ]; then
+              echo "ERROR: Missing file: $f"
+              exit 1
+            fi
+            echo "OK: $f"
+          done
+
+      - name: Check include guards
+        run: |
+          MQH_FILES=$(find MQL5/Include/AIEA -name "*.mqh")
+          for f in $MQH_FILES; do
+            if ! grep -q "#ifndef" "$f"; then
+              echo "ERROR: Missing include guard in $f"
+              exit 1
+            fi
+            if ! grep -q "#endif" "$f"; then
+              echo "ERROR: Missing #endif in $f"
+              exit 1
+            fi
+            echo "OK: Include guards in $f"
+          done
+
+      - name: Check for balanced braces
+        run: |
+          for f in $(find MQL5 Tests -name "*.mq5" -o -name "*.mqh"); do
+            open=$(grep -o '{' "$f" | wc -l)
+            close=$(grep -o '}' "$f" | wc -l)
+            if [ "$open" != "$close" ]; then
+              echo "WARNING: Unbalanced braces in $f ($open open, $close close)"
+            else
+              echo "OK: Balanced braces in $f"
+            fi
+          done
+
+      - name: Check for required modules
+        run: |
+          # Verify main EA includes all modules
+          EA_FILE="MQL5/Experts/AIEA_Trader.mq5"
+          for module in Config IndicatorEngine RiskManager TradingJournal \
+                       LearningEngine PatternRecognition StrategyEvolution \
+                       OptimizationEngine ReportGenerator Dashboard; do
+            if ! grep -q "$module" "$EA_FILE"; then
+              echo "ERROR: Main EA missing include for $module"
+              exit 1
+            fi
+            echo "OK: $module included in main EA"
+          done
+
+      - name: Summary
+        run: |
+          echo "=== AIEA Trader CI Summary ==="
+          echo "MQL5 files: $(find MQL5 -name '*.mq5' -o -name '*.mqh' | wc -l)"
+          echo "Test files: $(find Tests -name '*.mq5' | wc -l)"
+          echo "Doc files: $(find docs -name '*.md' | wc -l)"
+          echo "All validations passed."
