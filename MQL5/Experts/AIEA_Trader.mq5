@@ -4,7 +4,7 @@
 //| Copyright 2026, AIEA Trader Project                               |
 //+------------------------------------------------------------------+
 #property copyright "2026, AIEA Trader"
-#property version   "0.01"
+#property version   "1.000"
 #property strict
 #property description "Self-Improving MT5 AI Trading EA"
 #property description "Trades autonomously and learns from every trade."
@@ -504,7 +504,7 @@ void ManageOpenPositions(const ParameterSet &params)
          {
             double newSL = currentPrice + trailingDist;
             newSL = NormalizeDouble(newSL, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS));
-            if(currentSL == 0.0 || newSL < currentSL && newSL < openPrice)
+            if(currentSL == 0.0 || (newSL < currentSL && newSL < openPrice))
             {
                trade.PositionModify(ticket, newSL, currentTP);
             }
