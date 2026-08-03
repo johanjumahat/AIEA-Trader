@@ -40,8 +40,8 @@ public:
    COptimizationEngine();
    ~COptimizationEngine();
 
-   bool   Init(CStrategyEvolution &evolution, CLearningEngine &learningEngine,
-               CPatternRecognition &patternRecognition, CTradingJournal &journal,
+   bool   Init(CStrategyEvolution &evolution, CLearningEngine &lrnEngine,
+               CPatternRecognition &ptrnRec, CTradingJournal &jrnl,
                int minEvidenceTrades = 10);
    bool   RunOptimization(int profileId);
    int    GetPendingChanges(ProposedChange &pending[], int &count);
@@ -79,15 +79,15 @@ COptimizationEngine::~COptimizationEngine()
 
 //--- Initialize
 bool COptimizationEngine::Init(CStrategyEvolution &evolution,
-                                CLearningEngine &learningEngine,
-                                CPatternRecognition &patternRecognition,
-                                CTradingJournal &journal,
+                                CLearningEngine &lrnEngine,
+                                CPatternRecognition &ptrnRec,
+                                CTradingJournal &jrnl,
                                 int minEvidenceTrades)
 {
    m_evolution = GetPointer(evolution);
-   m_learningEngine = GetPointer(learningEngine);
-   m_patternRecognition = GetPointer(patternRecognition);
-   m_journal = GetPointer(journal);
+   m_learningEngine = GetPointer(lrnEngine);
+   m_patternRecognition = GetPointer(ptrnRec);
+   m_journal = GetPointer(jrnl);
    m_minEvidenceTrades = minEvidenceTrades;
    return true;
 }
