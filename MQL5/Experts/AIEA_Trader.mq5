@@ -909,6 +909,7 @@ void SP_UpdateLabel(string name, string text, color clr)
 }
 
 bool g_statusPanelCreated = false;
+int  g_indicatorFailStreak = 0;
 
 void CreateStatusPanel()
 {
@@ -1207,6 +1208,7 @@ void PrintHeartbeat()
 
    if(hasSnapshot)
    {
+      g_indicatorFailStreak = 0;
       trendStr = GetTrendString(snap);
       waitingReason = GetWaitingReason(ps, snap);
       buyConf = indicatorEngine.CalculateConfidence(snap, ORDER_TYPE_BUY);
@@ -1230,7 +1232,21 @@ void PrintHeartbeat()
    }
    else
    {
-      waitingReason = "Indicators not ready (warming up buffers)";
+      g_indicatorFailStreak++;
+      waitingReason = StringFormat("%s [check #%d]", indicatorEngine.GetLastFailReason(), g_indicatorFailStreak);
+
+      // After ~10 failed heartbeats (5 minutes at default 30s), try re-initializing the handles —
+      // this recovers from a broker that hadn't finished sending history on first attach.
+      if(g_indicatorFailStreak > 0 && g_indicatorFailStreak % 10 == 0)
+      {
+         Print("[AIEA] Indicators stuck for ", g_indicatorFailStreak,
+               " checks — attempting to re-initialize indicator handles...");
+         indicatorEngine.Deinit();
+         if(indicatorEngine.Init(g_symbol, InpTimeframe, ps))
+            Print("[AIEA] Indicator handles re-created. Waiting for buffers to fill...");
+         else
+            Print("[AIEA] Re-init FAILED — check symbol '", g_symbol, "' and timeframe are valid and in Market Watch.");
+      }
    }
 
    // Print to Experts log
@@ -1257,13 +1273,31 @@ void PrintHeartbeat()
    }
    else
    {
-      // Indicators not ready — show in panel
+      // Indicators not ready — show the REAL reason, not a generic message
       CreateStatusPanel();
-      SP_UpdateLabel("trend_val", "Indicators loading...", clrSilver);
+      SP_UpdateLabel("trend_val", "Not ready", clrOrange);
       SP_UpdateLabel("conf_val", "Buy: -- | Sell: -- | Need: --", clrSilver);
-      SP_UpdateLabel("ind_val", "Warming up indicator buffers...", clrSilver);
-      SP_UpdateLabel("wait_val1", "Waiting for indicators to initialize", clrYellow);
-      SP_UpdateLabel("wait_val2", "", clrYellow);
+      SP_UpdateLabel("ind_val", StringFormat("Bars available: %d | Synced: %s",
+                        Bars(g_symbol, InpTimeframe),
+                        (SeriesInfoInteger(g_symbol, InpTimeframe, SERIES_SYNCHRONIZED) ? "yes" : "NO")),
+                    clrSilver);
+
+      string reason = waitingReason; // set above from indicatorEngine.GetLastFailReason()
+      if(StringLen(reason) > 50)
+      {
+         int splitPos = 50;
+         for(int i = 50; i > 30; i--)
+         {
+            if(StringGetCharacter(reason, i) == ' ') { splitPos = i; break; }
+         }
+         SP_UpdateLabel("wait_val1", StringSubstr(reason, 0, splitPos), clrYellow);
+         SP_UpdateLabel("wait_val2", StringSubstr(reason, splitPos), clrYellow);
+      }
+      else
+      {
+         SP_UpdateLabel("wait_val1", reason, clrYellow);
+         SP_UpdateLabel("wait_val2", "", clrYellow);
+      }
       ChartRedraw(0);
    }
 }
