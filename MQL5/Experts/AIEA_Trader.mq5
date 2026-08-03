@@ -54,6 +54,9 @@ input group "=== Timing ==="
 input int             InpReportIntervalMinutes = 60;      // Report update interval
 input int             InpOptimizeIntervalMinutes = 120;  // Optimization interval
 
+input group "=== Trading Hours ==="
+input bool            InpTradeAllHours     = true;          // Trade 24 hours (ignore hour filter)
+
 input group "=== Diagnostics ==="
 input bool   InpVerbose           = true;           // Verbose logging to Experts tab
 input int    InpHeartbeatSeconds  = 30;             // Heartbeat interval (seconds)
@@ -831,6 +834,8 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
+   DestroyStatusPanel();
+   Comment("");
    indicatorEngine.Deinit();
 
    // Save state
@@ -846,6 +851,199 @@ void OnDeinit(const int reason)
       dashboard.Destroy();
 
    Print("[AIEA] Deinitialized. Reason: ", reason);
+}
+
+//+------------------------------------------------------------------+
+//| Status Panel — chart objects for trend + waiting reason            |
+//+------------------------------------------------------------------+
+#define SP_PREFIX "AIEA_SP_"
+
+void SP_CreateLabel(string name, string text, int x, int y,
+                     color clr = clrWhite, int fontSize = 10)
+{
+   string objName = SP_PREFIX + name;
+   if(ObjectFind(0, objName) >= 0)
+      ObjectDelete(0, objName);
+
+   ObjectCreate(0, objName, OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, objName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, objName, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, objName, OBJPROP_YDISTANCE, y);
+   ObjectSetString(0, objName, OBJPROP_TEXT, text);
+   ObjectSetString(0, objName, OBJPROP_FONT, "Consolas");
+   ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, fontSize);
+   ObjectSetInteger(0, objName, OBJPROP_COLOR, clr);
+   ObjectSetInteger(0, objName, OBJPROP_BACK, false);
+   ObjectSetInteger(0, objName, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, objName, OBJPROP_HIDDEN, true);
+}
+
+void SP_CreateRect(string name, int x, int y, int w, int h, color bgClr)
+{
+   string objName = SP_PREFIX + name;
+   if(ObjectFind(0, objName) >= 0)
+      ObjectDelete(0, objName);
+
+   ObjectCreate(0, objName, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, objName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, objName, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, objName, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, objName, OBJPROP_XSIZE, w);
+   ObjectSetInteger(0, objName, OBJPROP_YSIZE, h);
+   ObjectSetInteger(0, objName, OBJPROP_BGCOLOR, bgClr);
+   ObjectSetInteger(0, objName, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetInteger(0, objName, OBJPROP_COLOR, clrDimGray);
+   ObjectSetInteger(0, objName, OBJPROP_BACK, false);
+   ObjectSetInteger(0, objName, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, objName, OBJPROP_HIDDEN, true);
+}
+
+void SP_UpdateLabel(string name, string text, color clr)
+{
+   string objName = SP_PREFIX + name;
+   if(ObjectFind(0, objName) >= 0)
+   {
+      ObjectSetString(0, objName, OBJPROP_TEXT, text);
+      ObjectSetInteger(0, objName, OBJPROP_COLOR, clr);
+   }
+}
+
+bool g_statusPanelCreated = false;
+
+void CreateStatusPanel()
+{
+   if(g_statusPanelCreated) return;
+
+   // Background panel — below the dashboard
+   SP_CreateRect("bg", 10, 350, 380, 210, C'20,20,30');
+
+   // Title
+   SP_CreateLabel("title", "AIEA — Market Status", 20, 360, clrGold, 12);
+
+   // Separator
+   SP_CreateLabel("sep1", "─────────────────────────", 20, 380, clrDimGray);
+
+   // Trend section
+   SP_CreateLabel("trend_lbl", "TREND:", 20, 395, clrGray);
+   SP_CreateLabel("trend_val", "Loading...", 130, 395, clrWhite, 11);
+
+   // Confidence section
+   SP_CreateLabel("conf_lbl", "CONFIDENCE:", 20, 415, clrGray);
+   SP_CreateLabel("conf_val", "Buy: -- | Sell: -- | Need: --", 130, 415, clrWhite);
+
+   // Indicators line
+   SP_CreateLabel("ind_lbl", "INDICATORS:", 20, 435, clrGray);
+   SP_CreateLabel("ind_val", "Loading...", 130, 435, clrSilver);
+
+   // Separator
+   SP_CreateLabel("sep2", "─────────────────────────", 20, 455, clrDimGray);
+
+   // Waiting for section
+   SP_CreateLabel("wait_lbl", "WAITING FOR:", 20, 470, clrGray, 11);
+   SP_CreateLabel("wait_val1", "Initializing...", 20, 490, clrYellow);
+   SP_CreateLabel("wait_val2", "", 20, 508, clrYellow);
+
+   // Separator
+   SP_CreateLabel("sep3", "─────────────────────────", 20, 528, clrDimGray);
+
+   // Server time / hours
+   SP_CreateLabel("time_lbl", "SERVER TIME:", 20, 543, clrGray);
+   SP_CreateLabel("time_val", "--:-- (hours: --)", 130, 543, clrSilver);
+
+   g_statusPanelCreated = true;
+}
+
+void UpdateStatusPanel(const ParameterSet &ps, const IndicatorSnapshot &snap,
+                        const string &trendStr, const string &waitingReason)
+{
+   if(!g_statusPanelCreated) CreateStatusPanel();
+
+   // Trend with color
+   color trendClr = clrSilver;
+   if(StringFind(trendStr, "STRONG BULLISH") >= 0) trendClr = clrLime;
+   else if(StringFind(trendStr, "BULLISH") >= 0) trendClr = clrMediumSeaGreen;
+   else if(StringFind(trendStr, "STRONG BEARISH") >= 0) trendClr = clrRed;
+   else if(StringFind(trendStr, "BEARISH") >= 0) trendClr = clrTomato;
+   else if(StringFind(trendStr, "RANGING") >= 0) trendClr = clrGoldenrod;
+   SP_UpdateLabel("trend_val", trendStr, trendClr);
+
+   // Confidence
+   double buyConf = indicatorEngine.CalculateConfidence(snap, ORDER_TYPE_BUY);
+   double sellConf = indicatorEngine.CalculateConfidence(snap, ORDER_TYPE_SELL);
+   double bestConf = MathMax(buyConf, sellConf);
+   color confClr = (bestConf >= ps.minConfidence ? clrLime : (bestConf >= ps.minConfidence * 0.7 ? clrYellow : clrSilver));
+   SP_UpdateLabel("conf_val",
+      StringFormat("Buy: %.1f | Sell: %.1f | Need: %.0f", buyConf, sellConf, ps.minConfidence),
+      confClr);
+
+   // Indicators summary
+   string regimeStr;
+   switch(snap.regime)
+   {
+      case REGIME_TRENDING:  regimeStr = "Trend"; break;
+      case REGIME_RANGING:   regimeStr = "Range"; break;
+      case REGIME_VOLATILE:  regimeStr = "Volat"; break;
+      default:               regimeStr = "?";     break;
+   }
+   SP_UpdateLabel("ind_val",
+      StringFormat("RSI %.1f | MA %s | MACD %s | Stoch %.1f | Vol %.2f%% | %s",
+         snap.rsi,
+         (snap.maFast > snap.maSlow ? "↑" : "↓"),
+         (snap.macdMain > snap.macdSignal ? "↑" : "↓"),
+         snap.stochMain, snap.volatilityPercent, regimeStr),
+      clrSilver);
+
+   // Waiting reason — split into 2 lines if long
+   if(StringLen(waitingReason) > 50)
+   {
+      int splitPos = 50;
+      // Find a space near position 50 to split cleanly
+      for(int i = 50; i > 30; i--)
+      {
+         if(StringGetCharacter(waitingReason, i) == ' ')
+         {
+            splitPos = i;
+            break;
+         }
+      }
+      SP_UpdateLabel("wait_val1", StringSubstr(waitingReason, 0, splitPos), clrYellow);
+      SP_UpdateLabel("wait_val2", StringSubstr(waitingReason, splitPos), clrYellow);
+   }
+   else
+   {
+      SP_UpdateLabel("wait_val1", waitingReason, clrYellow);
+      SP_UpdateLabel("wait_val2", "", clrYellow);
+   }
+
+   // Server time + hours
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   string hoursStr;
+   if(InpTradeAllHours)
+      hoursStr = "24h mode";
+   else
+      hoursStr = StringFormat("hours %d-%d", ps.tradingStartHour, ps.tradingEndHour);
+   SP_UpdateLabel("time_val",
+      StringFormat("%02d:%02d (%s)", dt.hour, dt.min, hoursStr),
+      clrSilver);
+
+   ChartRedraw(0);
+}
+
+void DestroyStatusPanel()
+{
+   if(!g_statusPanelCreated) return;
+   string names[] = {"bg","title","sep1","sep2","sep3",
+      "trend_lbl","trend_val","conf_lbl","conf_val",
+      "ind_lbl","ind_val","wait_lbl","wait_val1","wait_val2",
+      "time_lbl","time_val"};
+   for(int i = 0; i < ArraySize(names); i++)
+   {
+      string objName = SP_PREFIX + names[i];
+      if(ObjectFind(0, objName) >= 0)
+         ObjectDelete(0, objName);
+   }
+   g_statusPanelCreated = false;
 }
 
 //+------------------------------------------------------------------+
@@ -890,14 +1088,14 @@ string GetWaitingReason(const ParameterSet &ps, const IndicatorSnapshot &snap)
 {
    MqlDateTime dt;
    TimeToStruct(TimeCurrent(), dt);
-   bool inHours = (dt.hour >= ps.tradingStartHour && dt.hour < ps.tradingEndHour);
+   bool inHours = InpTradeAllHours || (dt.hour >= ps.tradingStartHour && dt.hour < ps.tradingEndHour);
 
    // Check each blocker in order of priority
    if(riskManager.IsHalted())
       return "Risk halt: " + riskManager.GetHaltReason();
 
    if(!inHours)
-      return StringFormat("Trading hours (waiting for %d:00, currently %d:00)",
+      return StringFormat("Trading hours (waiting for %d:00, server hour %d:00)",
                            ps.tradingStartHour, dt.hour);
 
    int positions = 0;
@@ -1052,41 +1250,22 @@ void PrintHeartbeat()
          " | Hour: ", dt.hour, " (", (inHours ? "IN" : "OUT"), ")",
          " | Profile: #", ps.id, " (", ps.name, ")");
 
-   // Show on chart Comment
-   string chartText = StringFormat(
-      "═══ AIEA Trader v1.000 ═══\n"
-      "Symbol: %s | TF: %s | Profile: #%d (%s)\n"
-      "──────────────────────────\n"
-      "TREND: %s\n"
-      "Confidence — Buy: %.1f | Sell: %.1f | Need: %.0f\n",
-      g_symbol, EnumToString(InpTimeframe), ps.id, ps.name,
-      trendStr,
-      buyConf, sellConf, ps.minConfidence);
-
+   // Update chart status panel
    if(hasSnapshot)
    {
-      chartText += StringFormat(
-         "RSI: %.1f | MA: %s | MACD: %s | Stoch: %.1f | Vol: %.2f%%\n"
-         "──────────────────────────\n",
-         snap.rsi,
-         (snap.maFast > snap.maSlow ? "BULL" : "BEAR"),
-         (snap.macdMain > snap.macdSignal ? "BULL" : "BEAR"),
-         snap.stochMain, snap.volatilityPercent);
+      UpdateStatusPanel(ps, snap, trendStr, waitingReason);
    }
-
-   chartText += StringFormat(
-      "WAITING FOR:\n%s\n"
-      "──────────────────────────\n"
-      "Status: %s%s | Equity: %.2f\n"
-      "Positions: %d/%d | Spread: %d/%d | Hour: %d (%s)\n"
-      "%s",
-      waitingReason,
-      status, (haltReason != "" ? " — " + haltReason : ""), equity,
-      positions, ps.maxOpenPositions, spread, (int)ps.maxSpreadPoints,
-      dt.hour, (inHours ? "IN HOURS" : "OUTSIDE HOURS"),
-      hasSnapshot ? indicatorSummary : "");
-
-   Comment(chartText);
+   else
+   {
+      // Indicators not ready — show in panel
+      CreateStatusPanel();
+      SP_UpdateLabel("trend_val", "Indicators loading...", clrSilver);
+      SP_UpdateLabel("conf_val", "Buy: -- | Sell: -- | Need: --", clrSilver);
+      SP_UpdateLabel("ind_val", "Warming up indicator buffers...", clrSilver);
+      SP_UpdateLabel("wait_val1", "Waiting for indicators to initialize", clrYellow);
+      SP_UpdateLabel("wait_val2", "", clrYellow);
+      ChartRedraw(0);
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -1222,11 +1401,11 @@ void OnTick()
    // Check trading hours
    MqlDateTime currentTime;
    TimeToStruct(TimeCurrent(), currentTime);
-   if(!indicatorEngine.IsWithinTradingHours(currentTime.hour,
+   if(!InpTradeAllHours && !indicatorEngine.IsWithinTradingHours(currentTime.hour,
        ps.tradingStartHour, ps.tradingEndHour))
    {
       if(InpVerbose)
-         Print("[AIEA] SKIP: Outside trading hours — current=", currentTime.hour,
+         Print("[AIEA] SKIP: Outside trading hours — server hour=", currentTime.hour,
                ", allowed=", ps.tradingStartHour, "-", ps.tradingEndHour);
       return;
    }
