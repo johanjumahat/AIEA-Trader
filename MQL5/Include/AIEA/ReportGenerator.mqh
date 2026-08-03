@@ -36,9 +36,9 @@ public:
    CReportGenerator();
    ~CReportGenerator();
 
-   bool   Init(CTradingJournal &journal, CLearningEngine &learningEngine,
-               CStrategyEvolution &evolution, CPatternRecognition &patternRecognition,
-               COptimizationEngine &optimizationEngine);
+   bool   Init(CTradingJournal &jrnl, CLearningEngine &lrnEngine,
+               CStrategyEvolution &evolution, CPatternRecognition &ptrnRec,
+               COptimizationEngine &optEngine);
    bool   GenerateDailyReport();
    bool   GenerateWeeklyReport();
    bool   GenerateMonthlyReport();
@@ -65,16 +65,16 @@ CReportGenerator::~CReportGenerator()
 }
 
 //--- Initialize
-bool CReportGenerator::Init(CTradingJournal &journal, CLearningEngine &learningEngine,
+bool CReportGenerator::Init(CTradingJournal &jrnl, CLearningEngine &lrnEngine,
                              CStrategyEvolution &evolution,
-                             CPatternRecognition &patternRecognition,
-                             COptimizationEngine &optimizationEngine)
+                             CPatternRecognition &ptrnRec,
+                             COptimizationEngine &optEngine)
 {
-   m_journal = GetPointer(journal);
-   m_learningEngine = GetPointer(learningEngine);
+   m_journal = GetPointer(jrnl);
+   m_learningEngine = GetPointer(lrnEngine);
    m_evolution = GetPointer(evolution);
-   m_patternRecognition = GetPointer(patternRecognition);
-   m_optimizationEngine = GetPointer(optimizationEngine);
+   m_patternRecognition = GetPointer(ptrnRec);
+   m_optimizationEngine = GetPointer(optEngine);
    return true;
 }
 
