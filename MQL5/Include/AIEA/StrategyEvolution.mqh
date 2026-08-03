@@ -32,7 +32,7 @@ public:
    CStrategyEvolution();
    ~CStrategyEvolution();
 
-   bool   Init(CLearningEngine &learningEngine, CTradingJournal &journal);
+   bool   Init(CLearningEngine &lrnEngine, CTradingJournal &jrnl);
    int    CreateProfile(string name, const ParameterSet &baseParams);
    bool   DeleteProfile(int profileId);
    bool   PromoteProfile(int profileId);
@@ -73,10 +73,10 @@ CStrategyEvolution::~CStrategyEvolution()
 }
 
 //--- Initialize
-bool CStrategyEvolution::Init(CLearningEngine &learningEngine, CTradingJournal &journal)
+bool CStrategyEvolution::Init(CLearningEngine &lrnEngine, CTradingJournal &jrnl)
 {
-   m_learningEngine = GetPointer(learningEngine);
-   m_journal = GetPointer(journal);
+   m_learningEngine = GetPointer(lrnEngine);
+   m_journal = GetPointer(jrnl);
 
    // Create default profile if none exists
    if(m_profileCount == 0)
