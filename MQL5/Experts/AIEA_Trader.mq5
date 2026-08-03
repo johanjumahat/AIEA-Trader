@@ -849,6 +849,125 @@ void OnDeinit(const int reason)
 }
 
 //+------------------------------------------------------------------+
+//| Determine current trend from indicator snapshot                   |
+//+------------------------------------------------------------------+
+string GetTrendString(const IndicatorSnapshot &snap)
+{
+   int bullScore = 0;
+   int bearScore = 0;
+
+   // MA direction
+   if(snap.maFast > snap.maSlow) bullScore++;
+   else bearScore++;
+
+   // MACD direction
+   if(snap.macdMain > snap.macdSignal && snap.macdHist > 0) bullScore++;
+   else if(snap.macdMain < snap.macdSignal && snap.macdHist < 0) bearScore++;
+
+   // RSI direction
+   if(snap.rsi > 50.0) bullScore++;
+   else if(snap.rsi < 50.0) bearScore++;
+
+   // Price vs BB middle
+   if(snap.closePrice > snap.bbMiddle) bullScore++;
+   else if(snap.closePrice < snap.bbMiddle) bearScore++;
+
+   // Price vs prev close
+   if(snap.closePrice > snap.prevClose) bullScore++;
+   else if(snap.closePrice < snap.prevClose) bearScore++;
+
+   if(bullScore >= 4) return "STRONG BULLISH";
+   if(bullScore == 3) return "BULLISH";
+   if(bearScore >= 4) return "STRONG BEARISH";
+   if(bearScore == 3) return "BEARISH";
+   return "RANGING / NEUTRAL";
+}
+
+//+------------------------------------------------------------------+
+//| Determine what the EA is waiting for before opening a trade        |
+//+------------------------------------------------------------------+
+string GetWaitingReason(const ParameterSet &ps, const IndicatorSnapshot &snap)
+{
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   bool inHours = (dt.hour >= ps.tradingStartHour && dt.hour < ps.tradingEndHour);
+
+   // Check each blocker in order of priority
+   if(riskManager.IsHalted())
+      return "Risk halt: " + riskManager.GetHaltReason();
+
+   if(!inHours)
+      return StringFormat("Trading hours (waiting for %d:00, currently %d:00)",
+                           ps.tradingStartHour, dt.hour);
+
+   int positions = 0;
+   for(int i = 0; i < PositionsTotal(); i++)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(positionInfo.SelectByTicket(ticket) && positionInfo.Magic() == InpMagicNumber)
+         positions++;
+   }
+   if(positions >= ps.maxOpenPositions)
+      return StringFormat("Max positions open (%d/%d) — waiting for a close",
+                           positions, ps.maxOpenPositions);
+
+   long spread = SymbolInfoInteger(g_symbol, SYMBOL_SPREAD);
+   if((double)spread > ps.maxSpreadPoints)
+      return StringFormat("Spread too wide (current %d, max %d) — waiting for tighter spread",
+                           (int)spread, (int)ps.maxSpreadPoints);
+
+   if(ps.volatilityFilter && snap.volatilityPercent > 3.0)
+      return StringFormat("Volatility too high (%.2f%%, max 3.0%%) — waiting to settle",
+                           snap.volatilityPercent);
+
+   // Confidence gap analysis
+   double buyConf = indicatorEngine.CalculateConfidence(snap, ORDER_TYPE_BUY);
+   double sellConf = indicatorEngine.CalculateConfidence(snap, ORDER_TYPE_SELL);
+   double bestConf = MathMax(buyConf, sellConf);
+   string bestDir = (buyConf > sellConf) ? "BUY" : "SELL";
+
+   if(bestConf < ps.minConfidence)
+   {
+      // Build breakdown of what's needed
+      string breakdown = "";
+      if(bestDir == "BUY")
+      {
+         if(snap.rsi >= 50.0 && snap.rsi > 30.0)
+            breakdown += StringFormat("RSI=%.1f (need <30 for strong buy) ", snap.rsi);
+         if(snap.maFast <= snap.maSlow)
+            breakdown += "MA bearish (need fast>slow) ";
+         if(snap.macdMain <= snap.macdSignal)
+            breakdown += "MACD bearish (need main>signal) ";
+         if(snap.stochMain >= 20.0)
+            breakdown += StringFormat("Stoch=%.1f (need <20) ", snap.stochMain);
+         if(snap.closePrice > snap.bbLower)
+            breakdown += "Price above BB lower ";
+      }
+      else
+      {
+         if(snap.rsi <= 50.0 && snap.rsi < 70.0)
+            breakdown += StringFormat("RSI=%.1f (need >70 for strong sell) ", snap.rsi);
+         if(snap.maFast >= snap.maSlow)
+            breakdown += "MA bullish (need fast<slow) ";
+         if(snap.macdMain >= snap.macdSignal)
+            breakdown += "MACD bullish (need main<signal) ";
+         if(snap.stochMain <= 80.0)
+            breakdown += StringFormat("Stoch=%.1f (need >80) ", snap.stochMain);
+         if(snap.closePrice < snap.bbUpper)
+            breakdown += "Price below BB upper ";
+      }
+
+      if(breakdown == "")
+         breakdown = "Indicators partially aligned but confidence too low";
+
+      return StringFormat("Confidence gap: %s at %.1f (need %.1f) — %s",
+                           bestDir, bestConf, ps.minConfidence, breakdown);
+   }
+
+   return "Signal ready — waiting for new bar to execute";
+}
+
+//+------------------------------------------------------------------+
 //| Print heartbeat status — periodic diagnostic output                |
 //+------------------------------------------------------------------+
 void PrintHeartbeat()
@@ -879,34 +998,95 @@ void PrintHeartbeat()
    TimeToStruct(TimeCurrent(), dt);
    bool inHours = (dt.hour >= ps.tradingStartHour && dt.hour < ps.tradingEndHour);
 
-   Print("[AIEA] Heartbeat — ", status,
+   // Get indicator snapshot for trend analysis
+   IndicatorSnapshot snap;
+   bool hasSnapshot = indicatorEngine.GetSnapshot(snap);
+
+   string trendStr = "Indicators loading...";
+   string waitingReason = "Initializing...";
+   string indicatorSummary = "";
+   double buyConf = 0.0, sellConf = 0.0;
+
+   if(hasSnapshot)
+   {
+      trendStr = GetTrendString(snap);
+      waitingReason = GetWaitingReason(ps, snap);
+      buyConf = indicatorEngine.CalculateConfidence(snap, ORDER_TYPE_BUY);
+      sellConf = indicatorEngine.CalculateConfidence(snap, ORDER_TYPE_SELL);
+
+      string regimeStr;
+      switch(snap.regime)
+      {
+         case REGIME_TRENDING:  regimeStr = "Trending";  break;
+         case REGIME_RANGING:   regimeStr = "Ranging";   break;
+         case REGIME_VOLATILE:  regimeStr = "Volatile";  break;
+         default:               regimeStr = "Unknown";   break;
+      }
+
+      indicatorSummary = StringFormat(
+         "RSI: %.1f | MA: %.5f/%.5f (%s) | MACD: %.5f/%.5f | Stoch: %.1f | ATR: %.5f | Vol: %.2f%% | Regime: %s",
+         snap.rsi, snap.maFast, snap.maSlow,
+         (snap.maFast > snap.maSlow ? "BULL" : "BEAR"),
+         snap.macdMain, snap.macdSignal,
+         snap.stochMain, snap.atr, snap.volatilityPercent, regimeStr);
+   }
+   else
+   {
+      waitingReason = "Indicators not ready (warming up buffers)";
+   }
+
+   // Print to Experts log
+   Print("[AIEA] ═══ Heartbeat ═══");
+   Print("[AIEA] Trend: ", trendStr);
+   Print("[AIEA] Confidence — Buy: ", DoubleToString(buyConf, 1),
+         " | Sell: ", DoubleToString(sellConf, 1),
+         " | Threshold: ", DoubleToString(ps.minConfidence, 1));
+   if(hasSnapshot)
+      Print("[AIEA] Indicators — ", indicatorSummary);
+   Print("[AIEA] Waiting for: ", waitingReason);
+   Print("[AIEA] Status: ", status,
          (haltReason != "" ? " (" + haltReason + ")" : ""),
          " | Equity: ", DoubleToString(equity, 2),
-         " | Positions: ", positions, "/", ps.maxOpenPositions,
+         " | Pos: ", positions, "/", ps.maxOpenPositions,
          " | Spread: ", spread, "/", (int)ps.maxSpreadPoints,
-         " | Hour: ", dt.hour, " (", (inHours ? "IN HOURS" : "OUTSIDE HOURS"), ")",
-         " | Profile: #", ps.id, " (", ps.name, ")",
-         " | MinConf: ", DoubleToString(ps.minConfidence, 0),
-         " | Symbol: ", g_symbol,
-         " | TF: ", EnumToString(InpTimeframe));
+         " | Hour: ", dt.hour, " (", (inHours ? "IN" : "OUT"), ")",
+         " | Profile: #", ps.id, " (", ps.name, ")");
 
-   // Show status on chart
-   Comment(StringFormat(
-      "AIEA Trader v1.000\n"
-      "Status: %s%s\n"
-      "Equity: %.2f | Balance: %.2f\n"
-      "Positions: %d/%d | Spread: %d/%d\n"
-      "Hour: %d (%s) | Profile: #%d (%s)\n"
-      "MinConfidence: %.0f | Symbol: %s | TF: %s\n"
+   // Show on chart Comment
+   string chartText = StringFormat(
+      "═══ AIEA Trader v1.000 ═══\n"
+      "Symbol: %s | TF: %s | Profile: #%d (%s)\n"
       "──────────────────────────\n"
-      "Waiting for new bar on %s...",
-      status, (haltReason != "" ? " — " + haltReason : ""),
-      equity, balance,
+      "TREND: %s\n"
+      "Confidence — Buy: %.1f | Sell: %.1f | Need: %.0f\n",
+      g_symbol, EnumToString(InpTimeframe), ps.id, ps.name,
+      trendStr,
+      buyConf, sellConf, ps.minConfidence);
+
+   if(hasSnapshot)
+   {
+      chartText += StringFormat(
+         "RSI: %.1f | MA: %s | MACD: %s | Stoch: %.1f | Vol: %.2f%%\n"
+         "──────────────────────────\n",
+         snap.rsi,
+         (snap.maFast > snap.maSlow ? "BULL" : "BEAR"),
+         (snap.macdMain > snap.macdSignal ? "BULL" : "BEAR"),
+         snap.stochMain, snap.volatilityPercent);
+   }
+
+   chartText += StringFormat(
+      "WAITING FOR:\n%s\n"
+      "──────────────────────────\n"
+      "Status: %s%s | Equity: %.2f\n"
+      "Positions: %d/%d | Spread: %d/%d | Hour: %d (%s)\n"
+      "%s",
+      waitingReason,
+      status, (haltReason != "" ? " — " + haltReason : ""), equity,
       positions, ps.maxOpenPositions, spread, (int)ps.maxSpreadPoints,
       dt.hour, (inHours ? "IN HOURS" : "OUTSIDE HOURS"),
-      ps.id, ps.name,
-      ps.minConfidence, g_symbol, EnumToString(InpTimeframe),
-      EnumToString(InpTimeframe)));
+      hasSnapshot ? indicatorSummary : "");
+
+   Comment(chartText);
 }
 
 //+------------------------------------------------------------------+
