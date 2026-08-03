@@ -26,7 +26,7 @@ public:
    CLearningEngine();
    ~CLearningEngine();
 
-   bool   Init(CTradingJournal &journal, int minTrades = 5);
+   bool   Init(CTradingJournal &jrnl, int minTrades = 5);
    void   AnalyzeTrade(JournalEntry &je, const ParameterSet &params);
    ENUM_ENTRY_QUALITY  AssessEntryTiming(const JournalEntry &je);
    ENUM_EXIT_QUALITY   AssessExitTiming(const JournalEntry &je);
@@ -57,9 +57,9 @@ CLearningEngine::~CLearningEngine()
 }
 
 //--- Initialize
-bool CLearningEngine::Init(CTradingJournal &journal, int minTrades)
+bool CLearningEngine::Init(CTradingJournal &jrnl, int minTrades)
 {
-   m_journal = GetPointer(journal);
+   m_journal = GetPointer(jrnl);
    m_minTradesForAnalysis = minTrades;
    return true;
 }
