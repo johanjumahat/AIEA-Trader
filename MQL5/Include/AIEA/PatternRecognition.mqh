@@ -30,16 +30,16 @@ public:
    CPatternRecognition();
    ~CPatternRecognition();
 
-   bool   Init(CTradingJournal &journal, int maxPatterns = 100);
+   bool   Init(CTradingJournal &jrnl, int maxPatterns = 100);
 
    // Pattern analysis
-   bool   AnalyzeAllPatterns(PatternStat &bestPatterns, int &bestCount,
-                            PatternStat &worstPatterns, int &worstCount);
-   bool   AnalyzeBySymbol(PatternStat &patterns, int &count);
-   bool   AnalyzeBySession(PatternStat &patterns, int &count);
-   bool   AnalyzeByWeekday(PatternStat &patterns, int &count);
-   bool   AnalyzeByRegime(PatternStat &patterns, int &count);
-   bool   AnalyzeByIndicatorCombo(PatternStat &patterns, int &count);
+   bool   AnalyzeAllPatterns(PatternStat &bestPatterns[], int &bestCount,
+                            PatternStat &worstPatterns[], int &worstCount);
+   bool   AnalyzeBySymbol(PatternStat &patterns[], int &count);
+   bool   AnalyzeBySession(PatternStat &patterns[], int &count);
+   bool   AnalyzeByWeekday(PatternStat &patterns[], int &count);
+   bool   AnalyzeByRegime(PatternStat &patterns[], int &count);
+   bool   AnalyzeByIndicatorCombo(PatternStat &patterns[], int &count);
 
    // Convenience queries
    string GetBestSymbol();
@@ -66,9 +66,9 @@ CPatternRecognition::~CPatternRecognition()
 }
 
 //--- Initialize
-bool CPatternRecognition::Init(CTradingJournal &journal, int maxPatterns)
+bool CPatternRecognition::Init(CTradingJournal &jrnl, int maxPatterns)
 {
-   m_journal = GetPointer(journal);
+   m_journal = GetPointer(jrnl);
    m_maxPatterns = maxPatterns;
    return true;
 }
@@ -148,8 +148,8 @@ void CPatternRecognition::SortPatternsByProfit(PatternStat &patterns[], int coun
 }
 
 //--- Analyze all patterns and rank best/worst
-bool CPatternRecognition::AnalyzeAllPatterns(PatternStat &bestPatterns, int &bestCount,
-                                             PatternStat &worstPatterns, int &worstCount)
+bool CPatternRecognition::AnalyzeAllPatterns(PatternStat &bestPatterns[], int &bestCount,
+                                             PatternStat &worstPatterns[], int &worstCount)
 {
    PatternStat allPatterns[];
    int totalCount = 0;
@@ -237,7 +237,7 @@ bool CPatternRecognition::AnalyzeAllPatterns(PatternStat &bestPatterns, int &bes
 }
 
 //--- Analyze performance by symbol
-bool CPatternRecognition::AnalyzeBySymbol(PatternStat &patterns, int &count)
+bool CPatternRecognition::AnalyzeBySymbol(PatternStat &patterns[], int &count)
 {
    count = 0;
    JournalEntry entries[];
@@ -271,7 +271,7 @@ bool CPatternRecognition::AnalyzeBySymbol(PatternStat &patterns, int &count)
 }
 
 //--- Analyze performance by session
-bool CPatternRecognition::AnalyzeBySession(PatternStat &patterns, int &count)
+bool CPatternRecognition::AnalyzeBySession(PatternStat &patterns[], int &count)
 {
    count = 0;
    JournalEntry entries[];
@@ -304,7 +304,7 @@ bool CPatternRecognition::AnalyzeBySession(PatternStat &patterns, int &count)
 }
 
 //--- Analyze performance by weekday
-bool CPatternRecognition::AnalyzeByWeekday(PatternStat &patterns, int &count)
+bool CPatternRecognition::AnalyzeByWeekday(PatternStat &patterns[], int &count)
 {
    count = 0;
    JournalEntry entries[];
@@ -343,7 +343,7 @@ bool CPatternRecognition::AnalyzeByWeekday(PatternStat &patterns, int &count)
 }
 
 //--- Analyze performance by market regime
-bool CPatternRecognition::AnalyzeByRegime(PatternStat &patterns, int &count)
+bool CPatternRecognition::AnalyzeByRegime(PatternStat &patterns[], int &count)
 {
    count = 0;
    JournalEntry entries[];
@@ -384,7 +384,7 @@ bool CPatternRecognition::AnalyzeByRegime(PatternStat &patterns, int &count)
 }
 
 //--- Analyze performance by indicator combination
-bool CPatternRecognition::AnalyzeByIndicatorCombo(PatternStat &patterns, int &count)
+bool CPatternRecognition::AnalyzeByIndicatorCombo(PatternStat &patterns[], int &count)
 {
    count = 0;
    JournalEntry entries[];
