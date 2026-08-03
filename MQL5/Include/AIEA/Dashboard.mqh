@@ -37,8 +37,8 @@ public:
    CDashboard();
    ~CDashboard();
 
-   bool   Init(CTradingJournal &journal, CLearningEngine &learningEngine,
-               CStrategyEvolution &evolution, CRiskManager &riskManager);
+   bool   Init(CTradingJournal &jrnl, CLearningEngine &lrnEngine,
+               CStrategyEvolution &evolution, CRiskManager &rskMgr);
    void   Create();
    void   Update();
    void   Destroy();
@@ -59,13 +59,13 @@ CDashboard::~CDashboard()
 }
 
 //--- Initialize
-bool CDashboard::Init(CTradingJournal &journal, CLearningEngine &learningEngine,
-                       CStrategyEvolution &evolution, CRiskManager &riskManager)
+bool CDashboard::Init(CTradingJournal &jrnl, CLearningEngine &lrnEngine,
+                       CStrategyEvolution &evolution, CRiskManager &rskMgr)
 {
-   m_journal = GetPointer(journal);
-   m_learningEngine = GetPointer(learningEngine);
+   m_journal = GetPointer(jrnl);
+   m_learningEngine = GetPointer(lrnEngine);
    m_evolution = GetPointer(evolution);
-   m_riskManager = GetPointer(riskManager);
+   m_riskManager = GetPointer(rskMgr);
    return true;
 }
 
