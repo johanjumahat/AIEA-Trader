@@ -1235,7 +1235,7 @@ void OnTick()
    if(!riskManager.CanOpenPosition(ps))
    {
       if(InpVerbose)
-         Print("[AIEA] SKIP: Max positions reached (", riskManager.GetOpenPositions(),
+         Print("[AIEA] SKIP: Max positions reached (", (PositionsTotal()),
                "/", ps.maxOpenPositions, ")");
       return;
    }
