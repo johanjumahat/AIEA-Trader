@@ -486,7 +486,9 @@ void TestOptimizationEngine()
          je.tpAssessment = TP_APPROPRIATE;
       }
 
-      le.AnalyzeTrade(je, *(ParameterSet*)0); // Just for lesson generation
+      ParameterSet testPs;
+      CreateDefaultParameterSet(testPs);
+      le.AnalyzeTrade(je, testPs); // Just for lesson generation
       jnl.WriteEntry(je);
    }
 
