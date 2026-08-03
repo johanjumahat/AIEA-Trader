@@ -54,6 +54,11 @@ input group "=== Timing ==="
 input int             InpReportIntervalMinutes = 60;      // Report update interval
 input int             InpOptimizeIntervalMinutes = 120;  // Optimization interval
 
+input group "=== Diagnostics ==="
+input bool   InpVerbose           = true;           // Verbose logging to Experts tab
+input int    InpHeartbeatSeconds  = 30;             // Heartbeat interval (seconds)
+input double InpMinConfidenceOverride = 0.0;        // Override min confidence (0=use profile)
+
 //==================================================================
 //  GLOBAL OBJECTS
 //==================================================================
@@ -792,6 +797,10 @@ int OnInit()
    strategyEvolution.SetProfileParam(activeId, "maxDrawdownPercent", InpMaxDrawdown);
    strategyEvolution.SetProfileParam(activeId, "maxOpenPositions", (double)InpMaxPositions);
 
+   // Override confidence threshold if specified
+   if(InpMinConfidenceOverride > 0.0)
+      strategyEvolution.SetProfileParam(activeId, "minConfidence", InpMinConfidenceOverride);
+
    // Reinitialize indicators with loaded parameters
    ParameterSet activePs;
    if(GetActiveParameters(activePs))
@@ -840,6 +849,131 @@ void OnDeinit(const int reason)
 }
 
 //+------------------------------------------------------------------+
+//| Print heartbeat status — periodic diagnostic output                |
+//+------------------------------------------------------------------+
+void PrintHeartbeat()
+{
+   ParameterSet ps;
+   if(!GetActiveParameters(ps))
+   {
+      CreateDefaultParameterSet(ps, 1);
+      ps.minConfidence = 45.0;
+   }
+
+   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   int positions = 0;
+
+   for(int i = 0; i < PositionsTotal(); i++)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(positionInfo.SelectByTicket(ticket) && positionInfo.Magic() == InpMagicNumber)
+         positions++;
+   }
+
+   long spread = SymbolInfoInteger(g_symbol, SYMBOL_SPREAD);
+   string status = riskManager.IsHalted() ? "HALTED" : "ACTIVE";
+   string haltReason = riskManager.IsHalted() ? riskManager.GetHaltReason() : "";
+
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   bool inHours = (dt.hour >= ps.tradingStartHour && dt.hour < ps.tradingEndHour);
+
+   Print("[AIEA] Heartbeat — ", status,
+         (haltReason != "" ? " (" + haltReason + ")" : ""),
+         " | Equity: ", DoubleToString(equity, 2),
+         " | Positions: ", positions, "/", ps.maxOpenPositions,
+         " | Spread: ", spread, "/", (int)ps.maxSpreadPoints,
+         " | Hour: ", dt.hour, " (", (inHours ? "IN HOURS" : "OUTSIDE HOURS"), ")",
+         " | Profile: #", ps.id, " (", ps.name, ")",
+         " | MinConf: ", DoubleToString(ps.minConfidence, 0),
+         " | Symbol: ", g_symbol,
+         " | TF: ", EnumToString(InpTimeframe));
+
+   // Show status on chart
+   Comment(StringFormat(
+      "AIEA Trader v1.000\n"
+      "Status: %s%s\n"
+      "Equity: %.2f | Balance: %.2f\n"
+      "Positions: %d/%d | Spread: %d/%d\n"
+      "Hour: %d (%s) | Profile: #%d (%s)\n"
+      "MinConfidence: %.0f | Symbol: %s | TF: %s\n"
+      "──────────────────────────\n"
+      "Waiting for new bar on %s...",
+      status, (haltReason != "" ? " — " + haltReason : ""),
+      equity, balance,
+      positions, ps.maxOpenPositions, spread, (int)ps.maxSpreadPoints,
+      dt.hour, (inHours ? "IN HOURS" : "OUTSIDE HOURS"),
+      ps.id, ps.name,
+      ps.minConfidence, g_symbol, EnumToString(InpTimeframe),
+      EnumToString(InpTimeframe)));
+}
+
+//+------------------------------------------------------------------+
+//| Enhanced signal evaluation with confidence breakdown               |
+//+------------------------------------------------------------------+
+int EvaluateSignalVerbose(const IndicatorSnapshot &snap, const ParameterSet &params,
+                           string &signalDetail)
+{
+   double buyConfidence = indicatorEngine.CalculateConfidence(snap, ORDER_TYPE_BUY);
+   double sellConfidence = indicatorEngine.CalculateConfidence(snap, ORDER_TYPE_SELL);
+
+   // Build detail string showing indicator values
+   string regimeStr;
+   switch(snap.regime)
+   {
+      case REGIME_TRENDING:  regimeStr = "Trending";  break;
+      case REGIME_RANGING:   regimeStr = "Ranging";   break;
+      case REGIME_VOLATILE:  regimeStr = "Volatile";  break;
+      default:               regimeStr = "Unknown";   break;
+   }
+
+   signalDetail = StringFormat(
+      "RSI=%.1f | MA Fast=%.5f Slow=%.5f (%s) | MACD Main=%.5f Signal=%.5f | "
+      "Stoch=%.1f | BB Upper=%.5f Lower=%.5f Close=%.5f | ATR=%.5f | "
+      "Regime=%s | Vol%%=%.2f",
+      snap.rsi, snap.maFast, snap.maSlow,
+      (snap.maFast > snap.maSlow ? "BULL" : "BEAR"),
+      snap.macdMain, snap.macdSignal,
+      snap.stochMain, snap.bbUpper, snap.bbLower, snap.closePrice,
+      snap.atr, regimeStr, snap.volatilityPercent);
+
+   if(InpVerbose)
+   {
+      Print("[AIEA] Indicators — ", signalDetail);
+      Print("[AIEA] Confidence — Buy: ", DoubleToString(buyConfidence, 1),
+            " | Sell: ", DoubleToString(sellConfidence, 1),
+            " | Threshold: ", DoubleToString(params.minConfidence, 1));
+   }
+
+   // Choose the direction with higher confidence
+   if(buyConfidence >= params.minConfidence && buyConfidence > sellConfidence)
+   {
+      if(InpVerbose)
+         Print("[AIEA] SIGNAL: BUY (confidence ", DoubleToString(buyConfidence, 1), ")");
+      return ORDER_TYPE_BUY;
+   }
+
+   if(sellConfidence >= params.minConfidence && sellConfidence > buyConfidence)
+   {
+      if(InpVerbose)
+         Print("[AIEA] SIGNAL: SELL (confidence ", DoubleToString(sellConfidence, 1), ")");
+      return ORDER_TYPE_SELL;
+   }
+
+   if(InpVerbose)
+   {
+      double maxConf = MathMax(buyConfidence, sellConfidence);
+      double gap = params.minConfidence - maxConf;
+      Print("[AIEA] NO SIGNAL — best confidence ", DoubleToString(maxConf, 1),
+            " is ", DoubleToString(gap, 1), " below threshold ",
+            DoubleToString(params.minConfidence, 1));
+   }
+
+   return -1; // No signal
+}
+
+//+------------------------------------------------------------------+
 //| Expert tick function — main trading loop                          |
 //+------------------------------------------------------------------+
 void OnTick()
@@ -858,28 +992,38 @@ void OnTick()
       ManageOpenPositions(ps);
    }
 
+   // Periodic heartbeat — shows EA is alive and what it's doing
+   static datetime lastHeartbeat = 0;
+   if(TimeCurrent() - lastHeartbeat >= InpHeartbeatSeconds)
+   {
+      lastHeartbeat = TimeCurrent();
+      PrintHeartbeat();
+   }
+
    // Only evaluate new entries on new bar
    if(!IsNewBar())
    {
-      // Still run periodic tasks
       RunReportCycle();
       return;
    }
 
+   // === NEW BAR — EVALUATING SIGNAL ===
+   if(InpVerbose)
+      Print("[AIEA] ─── New bar — evaluating signal ───");
+
    // Check risk manager
    if(riskManager.IsHalted())
    {
-      // Check if we can resume (new day)
-      MqlDateTime dt;
-      TimeToStruct(TimeCurrent(), dt);
-      dt.hour = 0; dt.min = 0; dt.sec = 0;
-      datetime today = StructToTime(dt);
+      if(InpVerbose)
+         Print("[AIEA] SKIP: Risk manager HALTED — ", riskManager.GetHaltReason());
 
+      // Check if we can resume (equity recovered)
       double equity = AccountInfoDouble(ACCOUNT_EQUITY);
       double startEquity = riskManager.GetStartOfDayEquity();
       if(startEquity > 0 && equity > startEquity)
       {
          riskManager.ResumeTrading();
+         Print("[AIEA] Trading resumed — equity recovered above start-of-day");
       }
       else
       {
@@ -889,34 +1033,64 @@ void OnTick()
 
    // Get active parameters
    if(!GetActiveParameters(ps))
+   {
+      if(InpVerbose)
+         Print("[AIEA] SKIP: No active profile found");
       return;
+   }
 
    // Check trading hours
    MqlDateTime currentTime;
    TimeToStruct(TimeCurrent(), currentTime);
    if(!indicatorEngine.IsWithinTradingHours(currentTime.hour,
        ps.tradingStartHour, ps.tradingEndHour))
+   {
+      if(InpVerbose)
+         Print("[AIEA] SKIP: Outside trading hours — current=", currentTime.hour,
+               ", allowed=", ps.tradingStartHour, "-", ps.tradingEndHour);
       return;
+   }
 
    // Check if we can open new positions
    if(!riskManager.CanOpenPosition(ps))
+   {
+      if(InpVerbose)
+         Print("[AIEA] SKIP: Max positions reached (", riskManager.GetOpenPositions(),
+               "/", ps.maxOpenPositions, ")");
       return;
+   }
 
    // Get indicator snapshot
    IndicatorSnapshot snap;
    if(!indicatorEngine.GetSnapshot(snap))
+   {
+      if(InpVerbose)
+         Print("[AIEA] SKIP: Failed to get indicator snapshot (indicators not ready?)");
       return;
+   }
 
    // Check spread
+   long currentSpread = SymbolInfoInteger(g_symbol, SYMBOL_SPREAD);
    if(!IsSpreadAcceptable(ps))
+   {
+      if(InpVerbose)
+         Print("[AIEA] SKIP: Spread too wide — current=", currentSpread,
+               " points, max=", (int)ps.maxSpreadPoints, " points");
       return;
+   }
 
    // Check volatility
    if(!IsVolatilityAcceptable(ps, snap.volatilityPercent))
+   {
+      if(InpVerbose)
+         Print("[AIEA] SKIP: Volatility too high — current=",
+               DoubleToString(snap.volatilityPercent, 2), "%, max=3.0%");
       return;
+   }
 
-   // Evaluate signal
-   int signal = EvaluateSignal(snap, ps);
+   // Evaluate signal with verbose output
+   string signalDetail = "";
+   int signal = EvaluateSignalVerbose(snap, ps, signalDetail);
    if(signal < 0)
       return;
 
