@@ -76,6 +76,7 @@ private:
    int      m_atrHandle;
    string   m_symbol;
    ENUM_TIMEFRAMES m_timeframe;
+   string   m_lastFailReason;
 
 public:
    CIndicatorEngine();
@@ -90,6 +91,8 @@ public:
    double CalculateConfidence(const IndicatorSnapshot &snap, int orderType);
    string GetSessionName(int hour);
    bool   IsWithinTradingHours(int currentHour, int startHour, int endHour);
+   string GetLastFailReason() { return m_lastFailReason; }
+   bool   IsHistoryReady();
 };
 
 //--- Constructor
@@ -153,31 +156,77 @@ void CIndicatorEngine::Deinit()
 }
 
 //--- Get a complete indicator snapshot
+bool CIndicatorEngine::IsHistoryReady()
+{
+   // Check if the terminal has finished syncing historical data for this symbol/timeframe
+   bool synced = (bool)SeriesInfoInteger(m_symbol, m_timeframe, SERIES_SYNCHRONIZED);
+   int  bars   = Bars(m_symbol, m_timeframe);
+   return synced && bars >= 50;
+}
+
 bool CIndicatorEngine::GetSnapshot(IndicatorSnapshot &snap)
 {
    InitIndicatorSnapshot(snap);
+   m_lastFailReason = "";
 
    double rsiBuf[2], maFastBuf[2], maSlowBuf[2];
    double bbUpper[2], bbLower[2], bbMiddle[2];
    double macdMain[2], macdSignal[2];
    double stochMain[2], stochSignal[2];
    double atrBuf[1];
-   double closeBuf[3], openBuf[3], highBuf[3], lowBuf[3];
 
-   if(CopyBuffer(m_rsiHandle, 0, 0, 2, rsiBuf) < 2) return false;
-   if(CopyBuffer(m_maFastHandle, 0, 0, 2, maFastBuf) < 2) return false;
-   if(CopyBuffer(m_maSlowHandle, 0, 0, 2, maSlowBuf) < 2) return false;
-   if(CopyBuffer(m_bbHandle, 1, 0, 2, bbUpper) < 2) return false;
-   if(CopyBuffer(m_bbHandle, 2, 0, 2, bbLower) < 2) return false;
-   if(CopyBuffer(m_bbHandle, 0, 0, 2, bbMiddle) < 2) return false;
-   if(CopyBuffer(m_macdHandle, 0, 0, 2, macdMain) < 2) return false;
-   if(CopyBuffer(m_macdHandle, 1, 0, 2, macdSignal) < 2) return false;
-   if(CopyBuffer(m_stochHandle, 0, 0, 2, stochMain) < 2) return false;
-   if(CopyBuffer(m_stochHandle, 1, 0, 2, stochSignal) < 2) return false;
-   if(CopyBuffer(m_atrHandle, 0, 0, 1, atrBuf) < 1) return false;
+   // Diagnostic pre-check: is history even synced for this symbol/timeframe?
+   int availableBars = Bars(m_symbol, m_timeframe);
+   bool synced = (bool)SeriesInfoInteger(m_symbol, m_timeframe, SERIES_SYNCHRONIZED);
+   if(!synced || availableBars < 5)
+   {
+      m_lastFailReason = StringFormat(
+         "History not ready for %s %s — synced=%s, bars=%d (need history download)",
+         m_symbol, EnumToString(m_timeframe), (synced ? "yes" : "NO"), availableBars);
+      return false;
+   }
+
+   int copied;
+   copied = CopyBuffer(m_rsiHandle, 0, 0, 2, rsiBuf);
+   if(copied < 2) { m_lastFailReason = StringFormat("RSI buffer not ready (got %d/2 bars, err=%d)", copied, GetLastError()); return false; }
+
+   copied = CopyBuffer(m_maFastHandle, 0, 0, 2, maFastBuf);
+   if(copied < 2) { m_lastFailReason = StringFormat("MA Fast buffer not ready (got %d/2 bars, err=%d)", copied, GetLastError()); return false; }
+
+   copied = CopyBuffer(m_maSlowHandle, 0, 0, 2, maSlowBuf);
+   if(copied < 2) { m_lastFailReason = StringFormat("MA Slow buffer not ready (got %d/2 bars, err=%d)", copied, GetLastError()); return false; }
+
+   copied = CopyBuffer(m_bbHandle, 1, 0, 2, bbUpper);
+   if(copied < 2) { m_lastFailReason = StringFormat("Bollinger Upper buffer not ready (got %d/2 bars, err=%d)", copied, GetLastError()); return false; }
+
+   copied = CopyBuffer(m_bbHandle, 2, 0, 2, bbLower);
+   if(copied < 2) { m_lastFailReason = StringFormat("Bollinger Lower buffer not ready (got %d/2 bars, err=%d)", copied, GetLastError()); return false; }
+
+   copied = CopyBuffer(m_bbHandle, 0, 0, 2, bbMiddle);
+   if(copied < 2) { m_lastFailReason = StringFormat("Bollinger Middle buffer not ready (got %d/2 bars, err=%d)", copied, GetLastError()); return false; }
+
+   copied = CopyBuffer(m_macdHandle, 0, 0, 2, macdMain);
+   if(copied < 2) { m_lastFailReason = StringFormat("MACD Main buffer not ready (got %d/2 bars, err=%d)", copied, GetLastError()); return false; }
+
+   copied = CopyBuffer(m_macdHandle, 1, 0, 2, macdSignal);
+   if(copied < 2) { m_lastFailReason = StringFormat("MACD Signal buffer not ready (got %d/2 bars, err=%d)", copied, GetLastError()); return false; }
+
+   copied = CopyBuffer(m_stochHandle, 0, 0, 2, stochMain);
+   if(copied < 2) { m_lastFailReason = StringFormat("Stochastic Main buffer not ready (got %d/2 bars, err=%d)", copied, GetLastError()); return false; }
+
+   copied = CopyBuffer(m_stochHandle, 1, 0, 2, stochSignal);
+   if(copied < 2) { m_lastFailReason = StringFormat("Stochastic Signal buffer not ready (got %d/2 bars, err=%d)", copied, GetLastError()); return false; }
+
+   copied = CopyBuffer(m_atrHandle, 0, 0, 1, atrBuf);
+   if(copied < 1) { m_lastFailReason = StringFormat("ATR buffer not ready (got %d/1 bars, err=%d)", copied, GetLastError()); return false; }
 
    MqlRates rates[3];
-   if(CopyRates(m_symbol, m_timeframe, 0, 3, rates) < 3) return false;
+   int ratesCopied = CopyRates(m_symbol, m_timeframe, 0, 3, rates);
+   if(ratesCopied < 3)
+   {
+      m_lastFailReason = StringFormat("Price history not ready (got %d/3 bars, err=%d)", ratesCopied, GetLastError());
+      return false;
+   }
 
    // CopyBuffer returns arrays in reverse chronological order (index 0 = oldest)
    snap.rsi         = rsiBuf[1];
