@@ -93,6 +93,7 @@ public:
    bool   IsWithinTradingHours(int currentHour, int startHour, int endHour);
    string GetLastFailReason() { return m_lastFailReason; }
    bool   IsHistoryReady();
+   bool   GetATRValue(double &atrValue);
 };
 
 //--- Constructor
@@ -162,6 +163,27 @@ bool CIndicatorEngine::IsHistoryReady()
    bool synced = (bool)SeriesInfoInteger(m_symbol, m_timeframe, SERIES_SYNCHRONIZED);
    int  bars   = Bars(m_symbol, m_timeframe);
    return synced && bars >= 50;
+}
+
+//+------------------------------------------------------------------+
+//| Get current ATR value using the ENGINE'S OWN persistent handle.    |
+//| Never create/release a separate ad-hoc ATR handle elsewhere —      |
+//| MT5 shares handles by (symbol,timeframe,params); repeatedly        |
+//| creating+releasing one from another function races against this   |
+//| handle's lifetime and can invalidate it (error 4807).              |
+//+------------------------------------------------------------------+
+bool CIndicatorEngine::GetATRValue(double &atrValue)
+{
+   if(m_atrHandle == INVALID_HANDLE)
+      return false;
+
+   double buf[1];
+   int copied = CopyBuffer(m_atrHandle, 0, 0, 1, buf);
+   if(copied < 1)
+      return false;
+
+   atrValue = buf[0];
+   return true;
 }
 
 bool CIndicatorEngine::GetSnapshot(IndicatorSnapshot &snap)
