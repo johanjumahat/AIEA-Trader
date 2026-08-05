@@ -61,6 +61,7 @@ input group "=== Diagnostics ==="
 input bool   InpVerbose           = true;           // Verbose logging to Experts tab
 input int    InpHeartbeatSeconds  = 30;             // Heartbeat interval (seconds)
 input double InpMinConfidenceOverride = 0.0;        // Override min confidence (0=use profile)
+input double InpMaxSpreadOverride   = 0.0;          // Override max spread in points (0=use profile, e.g. 3000 for BTCUSD)
 
 //==================================================================
 //  GLOBAL OBJECTS
@@ -798,6 +799,11 @@ int OnInit()
    // Override confidence threshold if specified
    if(InpMinConfidenceOverride > 0.0)
       strategyEvolution.SetProfileParam(activeId, "minConfidence", InpMinConfidenceOverride);
+
+   // Override max spread if specified — crypto symbols like BTCUSD naturally have
+   // spreads in the thousands of points, far above the forex/gold default of 30.
+   if(InpMaxSpreadOverride > 0.0)
+      strategyEvolution.SetProfileParam(activeId, "maxSpreadPoints", InpMaxSpreadOverride);
 
    // Reinitialize indicators with loaded parameters
    ParameterSet activePs;
