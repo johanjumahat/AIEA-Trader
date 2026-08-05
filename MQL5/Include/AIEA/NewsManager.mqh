@@ -39,7 +39,7 @@ struct SavedPosition
    ulong    ticket;
    double   originalSL;
    double   originalTP;
-   bool     protected;
+   bool     isProtected;
 };
 
 #define MAX_NEWS_EVENTS    50
@@ -68,6 +68,9 @@ private:
    SavedPosition  m_savedPositions[MAX_SAVED_POSITIONS];
    int            m_savedCount;
    CTrade         m_trade;
+   string         m_symbol;      // Symbol to protect (set via CheckNewsProtection)
+   int            m_magicNumber; // Magic number filter (set via CheckNewsProtection)
+   bool           m_verbose;     // Verbose logging flag
 
    bool   FindNextHighImpactEvent(datetime &eventTime);
    void   ApplySLProtection();
@@ -95,7 +98,7 @@ public:
    string GetTodaysNewsSummary();
 
    // News trade protection
-   void   CheckNewsProtection(string symbol, int magicNumber);
+   void   CheckNewsProtection(string symbol, int magicNumber, bool verbose = true);
    bool   IsProtecting() { return m_isProtecting; }
    string GetProtectionStatus();
 };
@@ -114,6 +117,9 @@ CNewsManager::CNewsManager()
    m_protectStartTime = 0;
    m_protectEventTime = 0;
    m_savedCount = 0;
+   m_symbol = "";
+   m_magicNumber = 0;
+   m_verbose = true;
 }
 
 //--- Destructor
@@ -160,10 +166,12 @@ bool CNewsManager::FetchTodaysNews()
       ne.currency   = country.currency;
       ne.title      = event.name;
       ne.importance = (int)event.importance;
-      ne.impact     = (int)values[i].impact;
-      ne.actual     = values[i].actual_value;
-      ne.forecast   = values[i].forecast_value;
-      ne.previous   = values[i].previous_value;
+      ne.impact     = (int)values[i].impact_type;
+      // Calendar numeric values are stored as long, multiplied by 10^6.
+      // LONG_MIN means the value is not set — treat as 0 to avoid overflow/NaN.
+      ne.actual     = (values[i].actual_value   == LONG_MIN) ? 0.0 : values[i].actual_value   / 1000000.0;
+      ne.forecast   = (values[i].forecast_value == LONG_MIN) ? 0.0 : values[i].forecast_value / 1000000.0;
+      ne.previous   = (values[i].prev_value     == LONG_MIN) ? 0.0 : values[i].prev_value     / 1000000.0;
 
       m_events[m_eventCount] = ne;
       m_eventCount++;
@@ -370,10 +378,14 @@ string CNewsManager::GetTodaysNewsSummary()
 //==================================================================
 
 //--- Main protection check — call on every tick
-void CNewsManager::CheckNewsProtection(string symbol, int magicNumber)
+void CNewsManager::CheckNewsProtection(string symbol, int magicNumber, bool verbose)
 {
    if(!m_protectMode)
       return;
+
+   m_symbol = symbol;
+   m_magicNumber = magicNumber;
+   m_verbose = verbose;
 
    datetime now = TimeCurrent();
    datetime nextEvent;
@@ -420,7 +432,7 @@ void CNewsManager::CheckNewsProtection(string symbol, int magicNumber)
       {
          int minsAfter = (int)((now - m_protectEventTime) / 60);
          int minsLeft = m_releaseMinutes - minsAfter;
-         if(InpVerbose)
+         if(m_verbose)
             Print("[AIEA News] Protection active — ", minsAfter,
                   " min after news, releasing in ", minsLeft, " min");
       }
@@ -431,8 +443,9 @@ void CNewsManager::CheckNewsProtection(string symbol, int magicNumber)
 void CNewsManager::ApplySLProtection()
 {
    m_savedCount = 0;
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+   string sym = (m_symbol != "") ? m_symbol : _Symbol;
+   double point = SymbolInfoDouble(sym, SYMBOL_POINT);
+   int digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
    double buffer = point * 10; // 10 points buffer above/below breakeven
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
@@ -441,10 +454,10 @@ void CNewsManager::ApplySLProtection()
       if(!PositionSelectByTicket(ticket))
          continue;
 
-      if(PositionGetInteger(POSITION_MAGIC) != InpMagicNumber)
+      if(PositionGetInteger(POSITION_MAGIC) != m_magicNumber)
          continue;
 
-      if(PositionGetString(POSITION_SYMBOL) != _Symbol)
+      if(PositionGetString(POSITION_SYMBOL) != sym)
          continue;
 
       double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
@@ -458,7 +471,7 @@ void CNewsManager::ApplySLProtection()
          m_savedPositions[m_savedCount].ticket = ticket;
          m_savedPositions[m_savedCount].originalSL = currentSL;
          m_savedPositions[m_savedCount].originalTP = currentTP;
-         m_savedPositions[m_savedCount].protected = true;
+         m_savedPositions[m_savedCount].isProtected = true;
          m_savedCount++;
       }
 
@@ -468,7 +481,7 @@ void CNewsManager::ApplySLProtection()
       {
          newSL = NormalizeDouble(openPrice + buffer, digits);
          // Only tighten — never loosen
-         if(newSL > currentSL && newSL < SymbolInfoDouble(_Symbol, SYMBOL_BID))
+         if(newSL > currentSL && newSL < SymbolInfoDouble(sym, SYMBOL_BID))
          {
             m_trade.PositionModify(ticket, newSL, currentTP);
             Print("[AIEA News] Protected BUY #", ticket,
@@ -480,7 +493,7 @@ void CNewsManager::ApplySLProtection()
       {
          newSL = NormalizeDouble(openPrice - buffer, digits);
          // Only tighten — never loosen
-         if((currentSL == 0.0 || newSL < currentSL) && newSL > SymbolInfoDouble(_Symbol, SYMBOL_ASK))
+         if((currentSL == 0.0 || newSL < currentSL) && newSL > SymbolInfoDouble(sym, SYMBOL_ASK))
          {
             m_trade.PositionModify(ticket, newSL, currentTP);
             Print("[AIEA News] Protected SELL #", ticket,
@@ -497,7 +510,8 @@ void CNewsManager::ApplySLProtection()
 //--- Remove SL protection: restore original SLs (only if tighter than current)
 void CNewsManager::RemoveSLProtection()
 {
-   int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+   string sym = (m_symbol != "") ? m_symbol : _Symbol;
+   int digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
 
    for(int i = 0; i < m_savedCount; i++)
    {
@@ -516,7 +530,7 @@ void CNewsManager::RemoveSLProtection()
 
       // Only restore if current SL is tighter than original (we tightened it)
       // and the position still belongs to us
-      if(PositionGetInteger(POSITION_MAGIC) != InpMagicNumber)
+      if(PositionGetInteger(POSITION_MAGIC) != m_magicNumber)
          continue;
 
       bool shouldRestore = false;
@@ -540,7 +554,7 @@ void CNewsManager::RemoveSLProtection()
                " to ", DoubleToString(originalSL, digits));
       }
 
-      m_savedPositions[i].protected = false;
+      m_savedPositions[i].isProtected = false;
    }
 
    m_savedCount = 0;
