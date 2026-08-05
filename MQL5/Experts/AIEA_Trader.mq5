@@ -70,6 +70,12 @@ input int    InpNewsWarningHours  = 2;               // Hours before high-impact
 input int    InpNewsBlockMinutes  = 15;              // Block trades N min before/after high-impact news
 input int    InpNewsRefreshMinutes = 30;             // How often to refresh news calendar (minutes)
 
+input group "=== News Trade Protection ==="
+input bool   InpNewsProtectTrades = true;            // Protect open trades before high-impact news
+input int    InpNewsProtectMinutes = 60;             // Start protecting N min before news
+input int    InpNewsReleaseMinutes = 60;             // Release protection N min after news
+input int    InpNewsSLBufferPoints = 10;             // SL buffer in points above/below breakeven
+
 //==================================================================
 //  GLOBAL OBJECTS
 //==================================================================
@@ -883,6 +889,9 @@ int OnInit()
    {
       newsManager.SetWarningHours(InpNewsWarningHours);
       newsManager.SetBlockMinutes(InpNewsBlockMinutes);
+      newsManager.SetProtectMinutes(InpNewsProtectMinutes);
+      newsManager.SetReleaseMinutes(InpNewsReleaseMinutes);
+      newsManager.SetProtectMode(InpNewsProtectTrades ? 1 : 0);
       Print("[AIEA] Fetching today's economic calendar...");
       newsManager.FetchTodaysNews();
    }
@@ -1348,13 +1357,20 @@ void PrintHeartbeat()
       string newsWarn = newsManager.GetWarningMessage();
       if(newsWarn != "")
       {
-         Print("[AIEA] ⚠ NEWS ALERT: ", newsWarn);
+         Print("[AIEA] NEWS ALERT: ", newsWarn);
          waitingReason = "NEWS: " + newsWarn;
       }
       if(newsManager.IsInNewsBlackout())
       {
          if(waitingReason == "" || StringFind(waitingReason, "NEWS") < 0)
             waitingReason = "High-impact news blackout window — trading paused";
+      }
+      if(newsManager.IsProtecting())
+      {
+         string protStatus = newsManager.GetProtectionStatus();
+         Print("[AIEA] ", protStatus);
+         if(waitingReason == "")
+            waitingReason = protStatus;
       }
    }
 
@@ -1492,6 +1508,12 @@ void OnTick()
    if(GetActiveParameters(ps))
    {
       ManageOpenPositions(ps);
+   }
+
+   // News trade protection — check every tick
+   if(InpEnableNewsFilter && InpNewsProtectTrades)
+   {
+      newsManager.CheckNewsProtection(g_symbol, InpMagicNumber);
    }
 
    // Periodic heartbeat — shows EA is alive and what it's doing
