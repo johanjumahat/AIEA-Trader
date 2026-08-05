@@ -285,6 +285,11 @@ void CDashboard::Update()
       {
          UpdateLabel("news_warning", "", clrBlack);
       }
+
+      // Protection status
+      string protStatus = m_newsManager.GetProtectionStatus();
+      if(protStatus != "")
+         UpdateLabel("news_warning", protStatus, clrOrange);
    }
 }
 
