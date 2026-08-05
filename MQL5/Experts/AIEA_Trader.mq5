@@ -61,7 +61,7 @@ input group "=== Diagnostics ==="
 input bool   InpVerbose           = true;           // Verbose logging to Experts tab
 input int    InpHeartbeatSeconds  = 30;             // Heartbeat interval (seconds)
 input double InpMinConfidenceOverride = 0.0;        // Override min confidence (0=use profile)
-input double InpMaxSpreadOverride   = 0.0;          // Override max spread in points (0=use profile, e.g. 3000 for BTCUSD)
+input double InpMaxSpreadOverride   = 0.0;          // Max spread in points (0=use profile, -1=AUTO detect per symbol)
 
 //==================================================================
 //  GLOBAL OBJECTS
@@ -740,6 +740,52 @@ void RunReportCycle()
 //==================================================================
 
 //+------------------------------------------------------------------+
+//| Auto-detect a reasonable max spread for the current symbol.         |
+//| Samples the live spread over ~1 second at startup, then sets      |
+//| max spread = sampled average × 3 (with a minimum floor).           |
+//| This avoids hardcoding spread values per symbol — BTCUSD naturally |
+//| has 2000+ point spreads, XAUUSD ~20-40, EURUSD ~5-15, etc.        |
+//+------------------------------------------------------------------+
+double AutoDetectMaxSpread()
+{
+   string sym = (InpSymbol == "") ? _Symbol : InpSymbol;
+
+   int validSamples = 0;
+   long sum = 0;
+
+   for(int i = 0; i < 10; i++)
+   {
+      long sp = SymbolInfoInteger(sym, SYMBOL_SPREAD);
+      if(sp > 0)
+      {
+         sum += sp;
+         validSamples++;
+      }
+      Sleep(100);
+   }
+
+   if(validSamples == 0)
+   {
+      Print("[AIEA] AutoDetect: could not sample spread for ", sym, " — using fallback 500");
+      return 500.0;
+   }
+
+   double avgSpread = (double)sum / validSamples;
+   double maxSpread = avgSpread * 3.0;
+
+   // Floor: at least 10 points so we don't set absurdly tight limits
+   if(maxSpread < 10.0) maxSpread = 10.0;
+
+   maxSpread = MathCeil(maxSpread);
+
+   Print("[AIEA] AutoDetect spread for ", sym,
+         ": avg=", (int)avgSpread, " pts (", validSamples, " samples)",
+         " -> max=", (int)maxSpread, " pts (3x avg)");
+
+   return maxSpread;
+}
+
+//+------------------------------------------------------------------+
 //| Expert initialization function                                    |
 //+------------------------------------------------------------------+
 int OnInit()
@@ -800,10 +846,21 @@ int OnInit()
    if(InpMinConfidenceOverride > 0.0)
       strategyEvolution.SetProfileParam(activeId, "minConfidence", InpMinConfidenceOverride);
 
-   // Override max spread if specified — crypto symbols like BTCUSD naturally have
-   // spreads in the thousands of points, far above the forex/gold default of 30.
-   if(InpMaxSpreadOverride > 0.0)
+   // Max spread handling:
+   //   InpMaxSpreadOverride > 0  → manual override (e.g. 3000 for BTCUSD)
+   //   InpMaxSpreadOverride = -1 → AUTO: sample live spread and set 3x average
+   //   InpMaxSpreadOverride = 0  → use profile default (30)
+   if(InpMaxSpreadOverride == -1.0)
+   {
+      double autoSpread = AutoDetectMaxSpread();
+      strategyEvolution.SetProfileParam(activeId, "maxSpreadPoints", autoSpread);
+      Print("[AIEA] Using AUTO-detected max spread: ", (int)autoSpread, " points");
+   }
+   else if(InpMaxSpreadOverride > 0.0)
+   {
       strategyEvolution.SetProfileParam(activeId, "maxSpreadPoints", InpMaxSpreadOverride);
+      Print("[AIEA] Using manual max spread override: ", (int)InpMaxSpreadOverride, " points");
+   }
 
    // Reinitialize indicators with loaded parameters
    ParameterSet activePs;
