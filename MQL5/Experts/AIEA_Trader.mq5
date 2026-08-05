@@ -444,17 +444,12 @@ void ManageOpenPositions(const ParameterSet &params)
    double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
    double atr = 0.0;
 
-   // Get current ATR for trailing
-   double atrBuf[1];
-   int atrHandle = iATR(g_symbol, InpTimeframe, params.atrPeriod);
-   if(atrHandle != INVALID_HANDLE)
-   {
-      if(CopyBuffer(atrHandle, 0, 0, 1, atrBuf) > 0)
-         atr = atrBuf[0];
-      IndicatorRelease(atrHandle);
-   }
-
-   if(atr <= 0.0) return;
+   // Get current ATR using the indicator engine's persistent handle.
+   // NEVER create a separate ad-hoc iATR() handle here — MT5 shares handles
+   // by (symbol,timeframe,params), and repeatedly creating/releasing one every
+   // tick races against the engine's own handle and can invalidate it (error 4807).
+   if(!indicatorEngine.GetATRValue(atr) || atr <= 0.0)
+      return;
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
@@ -1235,15 +1230,33 @@ void PrintHeartbeat()
       g_indicatorFailStreak++;
       waitingReason = StringFormat("%s [check #%d]", indicatorEngine.GetLastFailReason(), g_indicatorFailStreak);
 
-      // After ~10 failed heartbeats (5 minutes at default 30s), try re-initializing the handles —
-      // this recovers from a broker that hadn't finished sending history on first attach.
-      if(g_indicatorFailStreak > 0 && g_indicatorFailStreak % 10 == 0)
+      // Only attempt recovery if history genuinely isn't ready yet — once bars/sync look fine,
+      // repeatedly tearing down and rebuilding handles does more harm than good (MT5 shares
+      // handles internally by symbol/timeframe/params, so re-init churn can itself cause
+      // "wrong handle" errors). Cap retries and back off.
+      if(!indicatorEngine.IsHistoryReady())
       {
-         Print("[AIEA] Indicators stuck for ", g_indicatorFailStreak,
-               " checks — attempting to re-initialize indicator handles...");
+         if(g_indicatorFailStreak > 0 && g_indicatorFailStreak % 10 == 0 && g_indicatorFailStreak <= 100)
+         {
+            Print("[AIEA] History still not ready after ", g_indicatorFailStreak,
+                  " checks — attempting to re-initialize indicator handles...");
+            indicatorEngine.Deinit();
+            if(indicatorEngine.Init(g_symbol, InpTimeframe, ps))
+               Print("[AIEA] Indicator handles re-created. Waiting for history/buffers to fill...");
+            else
+               Print("[AIEA] Re-init FAILED — check symbol '", g_symbol, "' and timeframe are valid and in Market Watch.");
+         }
+      }
+      else if(g_indicatorFailStreak == 1 || g_indicatorFailStreak % 5 == 0)
+      {
+         // History is fine but a buffer call still failed — this is the real "wrong handle"
+         // scenario (handle got invalidated). Re-init right away, and keep retrying every
+         // few checks in case the first attempt doesn't take.
+         Print("[AIEA] History is ready but an indicator buffer failed (handle likely invalidated, streak=",
+               g_indicatorFailStreak, ") — re-initializing...");
          indicatorEngine.Deinit();
          if(indicatorEngine.Init(g_symbol, InpTimeframe, ps))
-            Print("[AIEA] Indicator handles re-created. Waiting for buffers to fill...");
+            Print("[AIEA] Indicator handles re-created successfully.");
          else
             Print("[AIEA] Re-init FAILED — check symbol '", g_symbol, "' and timeframe are valid and in Market Watch.");
       }
