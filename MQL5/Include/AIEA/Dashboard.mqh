@@ -11,6 +11,7 @@
 #include "StrategyEvolution.mqh"
 #include "RiskManager.mqh"
 #include "IndicatorEngine.mqh"
+#include "NewsManager.mqh"
 
 #define DASHBOARD_PREFIX "AIEA_"
 
@@ -25,6 +26,7 @@ private:
    CLearningEngine     *m_learningEngine;
    CStrategyEvolution  *m_evolution;
    CRiskManager        *m_riskManager;
+   CNewsManager        *m_newsManager;
 
    void   CreateLabel(string name, string text, int x, int y,
                       color clr = clrWhite, int fontSize = 10,
@@ -38,7 +40,8 @@ public:
    ~CDashboard();
 
    bool   Init(CTradingJournal &jrnl, CLearningEngine &lrnEngine,
-               CStrategyEvolution &evolution, CRiskManager &rskMgr);
+               CStrategyEvolution &evolution, CRiskManager &rskMgr,
+               CNewsManager &newsMgr);
    void   Create();
    void   Update();
    void   Destroy();
@@ -51,6 +54,7 @@ CDashboard::CDashboard()
    m_learningEngine = NULL;
    m_evolution = NULL;
    m_riskManager = NULL;
+   m_newsManager = NULL;
 }
 
 //--- Destructor
@@ -60,12 +64,14 @@ CDashboard::~CDashboard()
 
 //--- Initialize
 bool CDashboard::Init(CTradingJournal &jrnl, CLearningEngine &lrnEngine,
-                       CStrategyEvolution &evolution, CRiskManager &rskMgr)
+                       CStrategyEvolution &evolution, CRiskManager &rskMgr,
+                       CNewsManager &newsMgr)
 {
    m_journal = GetPointer(jrnl);
    m_learningEngine = GetPointer(lrnEngine);
    m_evolution = GetPointer(evolution);
    m_riskManager = GetPointer(rskMgr);
+   m_newsManager = GetPointer(newsMgr);
    return true;
 }
 
@@ -127,7 +133,7 @@ void CDashboard::UpdateLabel(string name, string text, color clr)
 void CDashboard::Create()
 {
    // Background panel
-   CreateRect("bg", 10, 20, 380, 320, C'20,20,30');
+   CreateRect("bg", 10, 20, 380, 420, C'20,20,30');
 
    // Title
    CreateLabel("title", "AIEA Trader — Dashboard", 20, 30, clrGold, 12, "Consolas");
@@ -182,8 +188,18 @@ void CDashboard::Create()
    // Separator
    CreateLabel("sep4", "─────────────────────────", 20, 305, clrDimGray, 10, "Consolas");
 
+   // News section
+   CreateLabel("news_title", "⚠ ECONOMIC NEWS", 20, 320, clrGold, 10, "Consolas");
+   CreateLabel("news_line1", "---", 20, 337, clrSilver, 9, "Consolas");
+   CreateLabel("news_line2", "---", 20, 352, clrSilver, 9, "Consolas");
+   CreateLabel("news_line3", "---", 20, 367, clrSilver, 9, "Consolas");
+   CreateLabel("news_warning", "", 20, 384, clrRed, 10, "Consolas");
+
+   // Separator
+   CreateLabel("sep5", "─────────────────────────", 20, 402, clrDimGray, 10, "Consolas");
+
    // Footer
-   CreateLabel("footer", "AIEA Trader v0.0.1", 20, 320, clrDimGray, 8, "Consolas");
+   CreateLabel("footer", "AIEA Trader v0.0.1", 20, 417, clrDimGray, 8, "Consolas");
 }
 
 //--- Update dashboard values
@@ -245,6 +261,30 @@ void CDashboard::Update()
    {
       UpdateLabel("status_val", "ACTIVE", clrLime);
       UpdateLabel("halt_lbl", "", clrBlack);
+   }
+
+   // === NEWS SECTION ===
+   if(m_newsManager != NULL)
+   {
+      string display = m_newsManager.GetNewsDisplayString();
+      string lines[5];
+      int numLines = StringSplit(display, '
+', lines);
+
+      UpdateLabel("news_line1", (numLines > 0 ? lines[0] : "---"), clrSilver);
+      UpdateLabel("news_line2", (numLines > 1 ? lines[1] : "---"), clrSilver);
+      UpdateLabel("news_line3", (numLines > 2 ? lines[2] : "---"), clrSilver);
+
+      // Warning banner
+      string warning = m_newsManager.GetWarningMessage();
+      if(warning != "")
+      {
+         UpdateLabel("news_warning", warning, clrRed);
+      }
+      else
+      {
+         UpdateLabel("news_warning", "", clrBlack);
+      }
    }
 }
 
