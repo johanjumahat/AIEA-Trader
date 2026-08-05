@@ -1513,7 +1513,7 @@ void OnTick()
    // News trade protection — check every tick
    if(InpEnableNewsFilter && InpNewsProtectTrades)
    {
-      newsManager.CheckNewsProtection(g_symbol, InpMagicNumber);
+      newsManager.CheckNewsProtection(g_symbol, InpMagicNumber, InpVerbose);
    }
 
    // Periodic heartbeat — shows EA is alive and what it's doing
