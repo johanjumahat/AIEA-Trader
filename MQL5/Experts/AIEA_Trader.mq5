@@ -23,6 +23,7 @@
 #include "AIEA\OptimizationEngine.mqh"
 #include "AIEA\ReportGenerator.mqh"
 #include "AIEA\Dashboard.mqh"
+#include "AIEA\NewsManager.mqh"
 
 //==================================================================
 //  INPUT PARAMETERS
@@ -63,6 +64,12 @@ input int    InpHeartbeatSeconds  = 30;             // Heartbeat interval (secon
 input double InpMinConfidenceOverride = 0.0;        // Override min confidence (0=use profile)
 input double InpMaxSpreadOverride   = 0.0;          // Max spread in points (0=use profile, -1=AUTO detect per symbol)
 
+input group "=== News Filter ==="
+input bool   InpEnableNewsFilter  = true;           // Enable economic news filter
+input int    InpNewsWarningHours  = 2;               // Hours before high-impact news to warn
+input int    InpNewsBlockMinutes  = 15;              // Block trades N min before/after high-impact news
+input int    InpNewsRefreshMinutes = 30;             // How often to refresh news calendar (minutes)
+
 //==================================================================
 //  GLOBAL OBJECTS
 //==================================================================
@@ -81,6 +88,7 @@ CStrategyEvolution   strategyEvolution;
 COptimizationEngine  optimizationEngine;
 CReportGenerator     reportGenerator;
 CDashboard           dashboard;
+CNewsManager          newsManager;
 
 // Internal tracking
 string             g_symbol;
@@ -870,10 +878,19 @@ int OnInit()
       indicatorEngine.Init(g_symbol, InpTimeframe, activePs);
    }
 
+   // Initialize news manager
+   if(InpEnableNewsFilter)
+   {
+      newsManager.SetWarningHours(InpNewsWarningHours);
+      newsManager.SetBlockMinutes(InpNewsBlockMinutes);
+      Print("[AIEA] Fetching today's economic calendar...");
+      newsManager.FetchTodaysNews();
+   }
+
    // Create dashboard
    if(InpEnableDashboard)
    {
-      dashboard.Init(journal, learningEngine, strategyEvolution, riskManager);
+      dashboard.Init(journal, learningEngine, strategyEvolution, riskManager, newsManager);
       dashboard.Create();
    }
 
@@ -1325,6 +1342,22 @@ void PrintHeartbeat()
       }
    }
 
+   // News warning
+   if(InpEnableNewsFilter)
+   {
+      string newsWarn = newsManager.GetWarningMessage();
+      if(newsWarn != "")
+      {
+         Print("[AIEA] ⚠ NEWS ALERT: ", newsWarn);
+         waitingReason = "NEWS: " + newsWarn;
+      }
+      if(newsManager.IsInNewsBlackout())
+      {
+         if(waitingReason == "" || StringFind(waitingReason, "NEWS") < 0)
+            waitingReason = "High-impact news blackout window — trading paused";
+      }
+   }
+
    // Print to Experts log
    Print("[AIEA] ═══ Heartbeat ═══");
    Print("[AIEA] Trend: ", trendStr);
@@ -1467,6 +1500,14 @@ void OnTick()
    {
       lastHeartbeat = TimeCurrent();
       PrintHeartbeat();
+   }
+
+   // Periodic news calendar refresh
+   static datetime lastNewsRefresh = 0;
+   if(InpEnableNewsFilter && TimeCurrent() - lastNewsRefresh >= InpNewsRefreshMinutes * 60)
+   {
+      lastNewsRefresh = TimeCurrent();
+      newsManager.FetchTodaysNews();
    }
 
    // Only evaluate new entries on new bar
