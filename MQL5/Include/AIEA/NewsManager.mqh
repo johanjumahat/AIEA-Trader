@@ -6,12 +6,15 @@
 //|   - Fetches today's high-impact news from broker's calendar       |
 //|   - Displays news on chart dashboard                              |
 //|   - Warns when high-impact news is within 2 hours                 |
-//|   - Optional: blocks trading during news window                   |
+//|   - Blocks trading during news window                            |
+//|   - Protects open trades before news: tightens SL to breakeven    |
+//|     or places hedge pending order, then restores after news      |
 //+------------------------------------------------------------------+
 #ifndef AIEA_NEWSMANAGER_MQH
 #define AIEA_NEWSMANAGER_MQH
 
 #include "Config.mqh"
+#include <Trade/Trade.mqh>
 
 //==================================================================
 //  NEWS DATA STRUCTURES
@@ -19,18 +22,28 @@
 
 struct NewsEvent
 {
-   datetime   time;           // Event time (server time)
-   string     country;        // Country code (US, EU, UK, JP, etc.)
-   string     currency;       // Affected currency
-   string     title;          // Event title
-   int        importance;     // 0=none, 1=low, 2=medium, 3=high
-   int        impact;         // 0=none, 1=positive, 2=negative
-   double     actual;         // Actual value (0 if not yet released)
-   double     forecast;       // Forecast value
-   double     previous;       // Previous value
+   datetime   time;
+   string     country;
+   string     currency;
+   string     title;
+   int        importance;
+   int        impact;
+   double     actual;
+   double     forecast;
+   double     previous;
 };
 
-#define MAX_NEWS_EVENTS 50
+//--- Saved SL state for restoring after news protection
+struct SavedPosition
+{
+   ulong    ticket;
+   double   originalSL;
+   double   originalTP;
+   bool     protected;
+};
+
+#define MAX_NEWS_EVENTS    50
+#define MAX_SAVED_POSITIONS 10
 
 //==================================================================
 //  NEWS MANAGER CLASS
@@ -39,11 +52,28 @@ struct NewsEvent
 class CNewsManager
 {
 private:
-   NewsEvent   m_events[MAX_NEWS_EVENTS];
-   int         m_eventCount;
-   datetime    m_lastUpdate;
-   int         m_warningHours;    // Hours before news to warn
-   int         m_blockMinutes;    // Minutes before/after news to block
+   NewsEvent      m_events[MAX_NEWS_EVENTS];
+   int            m_eventCount;
+   datetime       m_lastUpdate;
+   int            m_warningHours;
+   int            m_blockMinutes;
+
+   // News protection state
+   int            m_protectMinutes;     // Start protecting N min before news
+   int            m_releaseMinutes;     // Release protection N min after news
+   bool           m_protectMode;       // 0=off, 1=tighten SL, 2=hedge pending
+   bool           m_isProtecting;      // Currently in protection mode
+   datetime       m_protectStartTime;  // When we started protecting
+   datetime       m_protectEventTime;  // Time of the news event we're protecting for
+   SavedPosition  m_savedPositions[MAX_SAVED_POSITIONS];
+   int            m_savedCount;
+   CTrade         m_trade;
+
+   bool   FindNextHighImpactEvent(datetime &eventTime);
+   void   ApplySLProtection();
+   void   RemoveSLProtection();
+   void   ApplyHedgeProtection();
+   void   RemoveHedgeProtection();
 
 public:
    CNewsManager();
@@ -57,9 +87,17 @@ public:
    bool   GetEvent(int index, NewsEvent &evt);
    void   SetWarningHours(int hours) { m_warningHours = hours; }
    void   SetBlockMinutes(int minutes) { m_blockMinutes = minutes; }
+   void   SetProtectMinutes(int minutes) { m_protectMinutes = minutes; }
+   void   SetReleaseMinutes(int minutes) { m_releaseMinutes = minutes; }
+   void   SetProtectMode(int mode) { m_protectMode = (mode > 0); }
    string GetNewsDisplayString();
    string GetWarningMessage();
    string GetTodaysNewsSummary();
+
+   // News trade protection
+   void   CheckNewsProtection(string symbol, int magicNumber);
+   bool   IsProtecting() { return m_isProtecting; }
+   string GetProtectionStatus();
 };
 
 //--- Constructor
@@ -69,6 +107,13 @@ CNewsManager::CNewsManager()
    m_lastUpdate = 0;
    m_warningHours = 2;
    m_blockMinutes = 15;
+   m_protectMinutes = 60;    // Start protecting 60 min before news
+   m_releaseMinutes = 60;    // Release 60 min after news
+   m_protectMode = true;
+   m_isProtecting = false;
+   m_protectStartTime = 0;
+   m_protectEventTime = 0;
+   m_savedCount = 0;
 }
 
 //--- Destructor
@@ -126,7 +171,7 @@ bool CNewsManager::FetchTodaysNews()
 
    m_lastUpdate = TimeCurrent();
 
-   // Sort by time (simple bubble sort, small array)
+   // Sort by time
    for(int i = 0; i < m_eventCount - 1; i++)
    {
       for(int j = i + 1; j < m_eventCount; j++)
@@ -152,6 +197,21 @@ bool CNewsManager::FetchTodaysNews()
    return m_eventCount > 0;
 }
 
+//--- Find the next high-impact event time
+bool CNewsManager::FindNextHighImpactEvent(datetime &eventTime)
+{
+   datetime now = TimeCurrent();
+   for(int i = 0; i < m_eventCount; i++)
+   {
+      if(m_events[i].importance >= (int)CALENDAR_IMPORTANCE_HIGH && m_events[i].time >= now)
+      {
+         eventTime = m_events[i].time;
+         return true;
+      }
+   }
+   return false;
+}
+
 //--- Check if a high-impact news warning is active
 bool CNewsManager::IsNewsWarningActive()
 {
@@ -173,7 +233,6 @@ bool CNewsManager::IsNewsWarningActive()
 bool CNewsManager::GetNextHighImpactEvent(NewsEvent &evt)
 {
    datetime now = TimeCurrent();
-
    for(int i = 0; i < m_eventCount; i++)
    {
       if(m_events[i].importance >= (int)CALENDAR_IMPORTANCE_HIGH && m_events[i].time >= now)
@@ -273,7 +332,23 @@ string CNewsManager::GetWarningMessage()
                        TimeToString(evt.time, TIME_MINUTES));
 }
 
-//--- Get a full summary of today's news (for log printing)
+//--- Get protection status string for dashboard
+string CNewsManager::GetProtectionStatus()
+{
+   if(!m_isProtecting)
+      return "";
+
+   datetime now = TimeCurrent();
+   int minsToNews = (int)((m_protectEventTime - now) / 60);
+
+   if(minsToNews > 0)
+      return StringFormat("PROTECTING: SL tightened (news in %dm)", minsToNews);
+   else
+      return StringFormat("PROTECTING: SL tightened (news %dm ago, release in %dm)",
+                          -minsToNews, m_releaseMinutes - (int)((now - m_protectEventTime) / 60));
+}
+
+//--- Get a full summary of today's news
 string CNewsManager::GetTodaysNewsSummary()
 {
    if(m_eventCount == 0)
@@ -283,11 +358,192 @@ string CNewsManager::GetTodaysNewsSummary()
    for(int i = 0; i < m_eventCount; i++)
    {
       string impStr = (m_events[i].importance == 3 ? "HIGH" : "MED");
-      summary += StringFormat("  %s %s %s — %s\n",
+      summary += StringFormat("  %s %s %s - %s\n",
                               TimeToString(m_events[i].time, TIME_MINUTES),
                               impStr, m_events[i].country, m_events[i].title);
    }
    return summary;
+}
+
+//==================================================================
+//  NEWS TRADE PROTECTION
+//==================================================================
+
+//--- Main protection check — call on every tick
+void CNewsManager::CheckNewsProtection(string symbol, int magicNumber)
+{
+   if(!m_protectMode)
+      return;
+
+   datetime now = TimeCurrent();
+   datetime nextEvent;
+   bool hasEvent = FindNextHighImpactEvent(nextEvent);
+
+   if(!m_isProtecting)
+   {
+      // Check if we should START protecting
+      if(hasEvent)
+      {
+         int minsToNews = (int)((nextEvent - now) / 60);
+         if(minsToNews <= m_protectMinutes && minsToNews >= 0)
+         {
+            m_isProtecting = true;
+            m_protectStartTime = now;
+            m_protectEventTime = nextEvent;
+
+            Print("[AIEA News] PROTECTION ACTIVATED — high-impact news at ",
+                  TimeToString(nextEvent, TIME_MINUTES),
+                  " (in ", minsToNews, " min). Tightening SL on open positions.");
+
+            ApplySLProtection();
+         }
+      }
+   }
+   else
+   {
+      // Check if we should STOP protecting
+      // Release m_releaseMinutes after the news event
+      datetime releaseTime = m_protectEventTime + (datetime)(m_releaseMinutes * 60);
+
+      if(now >= releaseTime)
+      {
+         Print("[AIEA News] PROTECTION RELEASED — news window passed (",
+               m_releaseMinutes, " min after event). Restoring original SLs.");
+
+         RemoveSLProtection();
+         m_isProtecting = false;
+         m_protectStartTime = 0;
+         m_protectEventTime = 0;
+      }
+      // If we're already past the event but within release window, keep protecting
+      else if(now >= m_protectEventTime)
+      {
+         int minsAfter = (int)((now - m_protectEventTime) / 60);
+         int minsLeft = m_releaseMinutes - minsAfter;
+         if(InpVerbose)
+            Print("[AIEA News] Protection active — ", minsAfter,
+                  " min after news, releasing in ", minsLeft, " min");
+      }
+   }
+}
+
+//--- Apply SL protection: move SL to breakeven + small buffer on all open positions
+void CNewsManager::ApplySLProtection()
+{
+   m_savedCount = 0;
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+   double buffer = point * 10; // 10 points buffer above/below breakeven
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(!PositionSelectByTicket(ticket))
+         continue;
+
+      if(PositionGetInteger(POSITION_MAGIC) != InpMagicNumber)
+         continue;
+
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol)
+         continue;
+
+      double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+      double currentSL = PositionGetDouble(POSITION_SL);
+      double currentTP = PositionGetDouble(POSITION_TP);
+      long posType = PositionGetInteger(POSITION_TYPE);
+
+      // Save original state
+      if(m_savedCount < MAX_SAVED_POSITIONS)
+      {
+         m_savedPositions[m_savedCount].ticket = ticket;
+         m_savedPositions[m_savedCount].originalSL = currentSL;
+         m_savedPositions[m_savedCount].originalTP = currentTP;
+         m_savedPositions[m_savedCount].protected = true;
+         m_savedCount++;
+      }
+
+      // Calculate breakeven SL
+      double newSL;
+      if(posType == POSITION_TYPE_BUY)
+      {
+         newSL = NormalizeDouble(openPrice + buffer, digits);
+         // Only tighten — never loosen
+         if(newSL > currentSL && newSL < SymbolInfoDouble(_Symbol, SYMBOL_BID))
+         {
+            m_trade.PositionModify(ticket, newSL, currentTP);
+            Print("[AIEA News] Protected BUY #", ticket,
+                  " SL moved from ", DoubleToString(currentSL, digits),
+                  " to ", DoubleToString(newSL, digits), " (breakeven+", (int)buffer, "pts)");
+         }
+      }
+      else // SELL
+      {
+         newSL = NormalizeDouble(openPrice - buffer, digits);
+         // Only tighten — never loosen
+         if((currentSL == 0.0 || newSL < currentSL) && newSL > SymbolInfoDouble(_Symbol, SYMBOL_ASK))
+         {
+            m_trade.PositionModify(ticket, newSL, currentTP);
+            Print("[AIEA News] Protected SELL #", ticket,
+                  " SL moved from ", DoubleToString(currentSL, digits),
+                  " to ", DoubleToString(newSL, digits), " (breakeven-", (int)buffer, "pts)");
+         }
+      }
+   }
+
+   if(m_savedCount == 0)
+      Print("[AIEA News] No open positions to protect");
+}
+
+//--- Remove SL protection: restore original SLs (only if tighter than current)
+void CNewsManager::RemoveSLProtection()
+{
+   int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+
+   for(int i = 0; i < m_savedCount; i++)
+   {
+      ulong ticket = m_savedPositions[i].ticket;
+      if(!PositionSelectByTicket(ticket))
+      {
+         // Position was closed (likely hit the tightened SL) — skip
+         Print("[AIEA News] Position #", ticket, " no longer open (likely closed during news)");
+         continue;
+      }
+
+      double currentSL = PositionGetDouble(POSITION_SL);
+      double currentTP = PositionGetDouble(POSITION_TP);
+      double originalSL = m_savedPositions[i].originalSL;
+      long posType = PositionGetInteger(POSITION_TYPE);
+
+      // Only restore if current SL is tighter than original (we tightened it)
+      // and the position still belongs to us
+      if(PositionGetInteger(POSITION_MAGIC) != InpMagicNumber)
+         continue;
+
+      bool shouldRestore = false;
+      if(posType == POSITION_TYPE_BUY)
+      {
+         // If original SL was looser (further from price), restore it
+         if(originalSL == 0.0 || currentSL > originalSL)
+            shouldRestore = true;
+      }
+      else
+      {
+         if(originalSL == 0.0 || (currentSL != 0.0 && currentSL < originalSL))
+            shouldRestore = true;
+      }
+
+      if(shouldRestore)
+      {
+         m_trade.PositionModify(ticket, originalSL, currentTP);
+         Print("[AIEA News] Restored SL on #", ticket,
+               " from ", DoubleToString(currentSL, digits),
+               " to ", DoubleToString(originalSL, digits));
+      }
+
+      m_savedPositions[i].protected = false;
+   }
+
+   m_savedCount = 0;
 }
 
 #endif // AIEA_NEWSMANAGER_MQH
