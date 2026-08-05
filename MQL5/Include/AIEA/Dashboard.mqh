@@ -268,8 +268,7 @@ void CDashboard::Update()
    {
       string display = m_newsManager.GetNewsDisplayString();
       string lines[5];
-      int numLines = StringSplit(display, '
-', lines);
+      int numLines = StringSplit(display, (ushort)'\n', lines);
 
       UpdateLabel("news_line1", (numLines > 0 ? lines[0] : "---"), clrSilver);
       UpdateLabel("news_line2", (numLines > 1 ? lines[1] : "---"), clrSilver);
