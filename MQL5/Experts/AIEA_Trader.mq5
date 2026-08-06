@@ -13,17 +13,17 @@
 #include <Trade\PositionInfo.mqh>
 #include <Trade\SymbolInfo.mqh>
 #include <Trade\AccountInfo.mqh>
-#include "AIEA\Config.mqh"
-#include "AIEA\IndicatorEngine.mqh"
-#include "AIEA\RiskManager.mqh"
-#include "AIEA\TradingJournal.mqh"
-#include "AIEA\LearningEngine.mqh"
-#include "AIEA\PatternRecognition.mqh"
-#include "AIEA\StrategyEvolution.mqh"
-#include "AIEA\OptimizationEngine.mqh"
-#include "AIEA\ReportGenerator.mqh"
-#include "AIEA\Dashboard.mqh"
-#include "AIEA\NewsManager.mqh"
+#include "Include\Config.mqh"
+#include "Include\IndicatorEngine.mqh"
+#include "Include\RiskManager.mqh"
+#include "Include\TradingJournal.mqh"
+#include "Include\LearningEngine.mqh"
+#include "Include\PatternRecognition.mqh"
+#include "Include\StrategyEvolution.mqh"
+#include "Include\OptimizationEngine.mqh"
+#include "Include\ReportGenerator.mqh"
+#include "Include\Dashboard.mqh"
+#include "Include\NewsManager.mqh"
 
 //==================================================================
 //  INPUT PARAMETERS
