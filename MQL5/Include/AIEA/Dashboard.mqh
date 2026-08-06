@@ -15,6 +15,32 @@
 
 #define DASHBOARD_PREFIX "AIEA_"
 
+//--- Format a number with thousand separators, e.g. 490016.62 -> "490,016.62"
+string FormatMoney(double value, int decimals = 2)
+{
+   bool neg = (value < 0.0);
+   if(neg) value = -value;
+
+   string numStr = DoubleToString(value, decimals);
+   int dotPos = StringFind(numStr, ".");
+
+   string intPart  = (dotPos >= 0) ? StringSubstr(numStr, 0, dotPos) : numStr;
+   string decPart  = (dotPos >= 0) ? StringSubstr(numStr, dotPos)    : "";
+
+   string result = "";
+   int len = StringLen(intPart);
+   int count = 0;
+   for(int i = len - 1; i >= 0; i--)
+   {
+      result = StringSubstr(intPart, i, 1) + result;
+      count++;
+      if(count % 3 == 0 && i != 0)
+         result = "," + result;
+   }
+
+   return (neg ? "-" : "") + result + decPart;
+}
+
 //==================================================================
 //  DASHBOARD CLASS
 //==================================================================
@@ -215,13 +241,13 @@ void CDashboard::Update()
    if(peakEquity > 0.0)
       drawdown = (peakEquity - equity) / peakEquity * 100.0;
 
-   UpdateLabel("equity_val", DoubleToString(equity, 2));
-   UpdateLabel("balance_val", DoubleToString(balance, 2));
+   UpdateLabel("equity_val", FormatMoney(equity, 2));
+   UpdateLabel("balance_val", FormatMoney(balance, 2));
    UpdateLabel("dd_val", StringFormat("%.1f%%", drawdown),
                (drawdown > 10.0 ? clrRed : (drawdown > 5.0 ? clrYellow : clrLime)));
 
    double dailyPnL = m_riskManager.GetDailyProfit();
-   UpdateLabel("daily_pnl_val", DoubleToString(dailyPnL, 2),
+   UpdateLabel("daily_pnl_val", FormatMoney(dailyPnL, 2),
                (dailyPnL >= 0.0 ? clrLime : clrRed));
 
    // Performance metrics
@@ -238,7 +264,7 @@ void CDashboard::Update()
                   (winRate >= 50.0 ? clrLime : (winRate >= 35.0 ? clrYellow : clrRed)));
       UpdateLabel("pf_val", StringFormat("%.2f", pf),
                   (pf >= 1.5 ? clrLime : (pf >= 1.0 ? clrYellow : clrRed)));
-      UpdateLabel("exp_val", DoubleToString(exp, 2),
+      UpdateLabel("exp_val", FormatMoney(exp, 2),
                   (exp >= 0.0 ? clrLime : clrRed));
 
       // Profile info
