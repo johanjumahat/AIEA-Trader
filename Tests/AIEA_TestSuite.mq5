@@ -7,15 +7,15 @@
 #property script_show_inputs
 
 #include <Trade\Trade.mqh>
-#include "AIEA\Config.mqh"
-#include "AIEA\IndicatorEngine.mqh"
-#include "AIEA\RiskManager.mqh"
-#include "AIEA\TradingJournal.mqh"
-#include "AIEA\LearningEngine.mqh"
-#include "AIEA\PatternRecognition.mqh"
-#include "AIEA\StrategyEvolution.mqh"
-#include "AIEA\OptimizationEngine.mqh"
-#include "AIEA\ReportGenerator.mqh"
+#include "..\MQL5\Experts\Include\Config.mqh"
+#include "..\MQL5\Experts\Include\IndicatorEngine.mqh"
+#include "..\MQL5\Experts\Include\RiskManager.mqh"
+#include "..\MQL5\Experts\Include\TradingJournal.mqh"
+#include "..\MQL5\Experts\Include\LearningEngine.mqh"
+#include "..\MQL5\Experts\Include\PatternRecognition.mqh"
+#include "..\MQL5\Experts\Include\StrategyEvolution.mqh"
+#include "..\MQL5\Experts\Include\OptimizationEngine.mqh"
+#include "..\MQL5\Experts\Include\ReportGenerator.mqh"
 
 //==================================================================
 //  TEST FRAMEWORK
