@@ -72,6 +72,12 @@ input int    InpNewsRefreshMinutes = 30;             // How often to refresh new
 input ENUM_NEWS_IMPORTANCE_FILTER InpNewsImportance = NEWS_IMPORTANCE_MEDIUM_UP; // Which impact levels to show/track
 input string InpNewsCountryFilter = "ALL";           // Country/currency filter: ALL or e.g. "US,EU,GB"
 
+input group "=== Profit Lock ==="
+input bool   InpEnableProfitLock  = true;            // Enable profit-lock SL (move SL to lock $ profit)
+input double InpProfitLockTrigger = 2.0;            // Trigger: when net profit (incl. swap) exceeds this ($)
+input double InpProfitLockTarget  = 1.0;            // Lock: move SL to secure this much net profit ($)
+input int    InpProfitLockStopLevel = 0;            // Min stop level in points (0 = auto from broker)
+
 input group "=== News Trade Protection ==="
 input bool   InpNewsProtectTrades = true;            // Protect open trades before high-impact news
 input int    InpNewsProtectMinutes = 60;             // Start protecting N min before news
@@ -455,10 +461,11 @@ bool OpenTrade(int orderType, const IndicatorSnapshot &snap, const ParameterSet 
    return success;
 }
 
-//--- Manage open positions (trailing stop, break-even)
+//--- Manage open positions (trailing stop, break-even, profit lock)
 void ManageOpenPositions(const ParameterSet &params)
 {
    double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
+   int    digits = (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS);
    double atr = 0.0;
 
    // Get current ATR using the indicator engine's persistent handle.
@@ -467,6 +474,13 @@ void ManageOpenPositions(const ParameterSet &params)
    // tick races against the engine's own handle and can invalidate it (error 4807).
    if(!indicatorEngine.GetATRValue(atr) || atr <= 0.0)
       return;
+
+   // Broker minimum stop level (in price units). If InpProfitLockStopLevel>0
+   // we use that override instead.
+   long brokerStopLevelPts = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   double minStopDist = (InpProfitLockStopLevel > 0)
+                        ? (point * InpProfitLockStopLevel)
+                        : (point * (int)brokerStopLevelPts);
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
@@ -480,10 +494,11 @@ void ManageOpenPositions(const ParameterSet &params)
       if(positionInfo.Symbol() != g_symbol)
          continue;
 
-      double openPrice = positionInfo.PriceOpen();
-      double currentSL = positionInfo.StopLoss();
-      double currentTP = positionInfo.TakeProfit();
-      long   posType = positionInfo.PositionType();
+      double openPrice  = positionInfo.PriceOpen();
+      double currentSL  = positionInfo.StopLoss();
+      double currentTP  = positionInfo.TakeProfit();
+      long   posType    = positionInfo.PositionType();
+      double volume     = positionInfo.Volume();
       double currentPrice = (posType == POSITION_TYPE_BUY) ?
                             SymbolInfoDouble(g_symbol, SYMBOL_BID) :
                             SymbolInfoDouble(g_symbol, SYMBOL_ASK);
@@ -491,12 +506,113 @@ void ManageOpenPositions(const ParameterSet &params)
       double trailingDist = atr * params.trailingStop;
       double beTrigger = atr * params.breakEvenTrigger;
 
+      //--- Profit Lock ---
+      // When net profit (floating P/L + accumulated swap) exceeds the trigger
+      // threshold, move the SL to a price that locks in InpProfitLockTarget $
+      // of net profit.  "Net" = profit + swap + commission, matching what the
+      // broker actually realises on close.
+      bool profitLockApplied = false;
+      if(InpEnableProfitLock)
+      {
+         // Current floating P/L from the position (already includes swap in MT5)
+         double floatingPL = positionInfo.Profit() + positionInfo.Swap();
+         // Commission is per-deal; approximate from the deal history if available
+         double commission = 0.0;
+         if(HistorySelectByPosition(ticket))
+         {
+            int deals = HistoryDealsTotal();
+            for(int d = 0; d < deals; d++)
+            {
+               ulong dTicket = HistoryDealGetTicket(d);
+               commission += HistoryDealGetDouble(dTicket, DEAL_COMMISSION);
+            }
+         }
+         double netProfit = floatingPL + commission;
+
+         if(netProfit >= InpProfitLockTrigger)
+         {
+            // Calculate the price at which net profit == InpProfitLockTarget
+            // For BUY:  profit = (slPrice - openPrice) * volume * tickValue/tickSize + swap + commission
+            //          slPrice = openPrice + (target - swap - commission) / (volume * tickValue/tickSize)
+            double tickValue = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_VALUE);
+            double tickSize  = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_SIZE);
+            double valuePerPriceUnit = 0.0;
+            if(tickSize > 0.0 && tickValue > 0.0)
+               valuePerPriceUnit = (tickValue / tickSize) * volume;
+
+            double swapAndComm = positionInfo.Swap() + commission;
+
+            double lockSL = 0.0;
+            if(posType == POSITION_TYPE_BUY && valuePerPriceUnit > 0.0)
+            {
+               // profit at SL = (lockSL - openPrice) * valuePerPriceUnit + swapAndComm
+               // we want profit = InpProfitLockTarget
+               // lockSL = openPrice + (InpProfitLockTarget - swapAndComm) / valuePerPriceUnit
+               lockSL = openPrice + (InpProfitLockTarget - swapAndComm) / valuePerPriceUnit;
+               // Ensure SL is below current price and respects broker stop level
+               lockSL = MathMin(lockSL, currentPrice - minStopDist);
+               lockSL = NormalizeDouble(lockSL, digits);
+
+               // Only move SL up (never loosen), and only if it's an improvement
+               if(lockSL > currentSL && lockSL < currentPrice)
+               {
+                  if(trade.PositionModify(ticket, lockSL, currentTP))
+                  {
+                     profitLockApplied = true;
+                     if(InpVerbose)
+                        Print("[AIEA] Profit Lock — BUY #", ticket,
+                              " netProfit=$", DoubleToString(netProfit, 2),
+                              " swap+comm=$", DoubleToString(swapAndComm, 2),
+                              " SL moved to ", DoubleToString(lockSL, digits),
+                              " (target $", DoubleToString(InpProfitLockTarget, 2), ")");
+                  }
+                  else if(InpVerbose)
+                     Print("[AIEA] Profit Lock — PositionModify failed for #", ticket,
+                           " err=", GetLastError());
+               }
+            }
+            else if(posType == POSITION_TYPE_SELL && valuePerPriceUnit > 0.0)
+            {
+               // For SELL: profit at SL = (openPrice - lockSL) * valuePerPriceUnit + swapAndComm
+               //          lockSL = openPrice - (InpProfitLockTarget - swapAndComm) / valuePerPriceUnit
+               lockSL = openPrice - (InpProfitLockTarget - swapAndComm) / valuePerPriceUnit;
+               // Ensure SL is above current price and respects broker stop level
+               lockSL = MathMax(lockSL, currentPrice + minStopDist);
+               lockSL = NormalizeDouble(lockSL, digits);
+
+               // Only move SL down (never loosen), and only if it's an improvement
+               if((currentSL == 0.0 || lockSL < currentSL) && lockSL > currentPrice)
+               {
+                  if(trade.PositionModify(ticket, lockSL, currentTP))
+                  {
+                     profitLockApplied = true;
+                     if(InpVerbose)
+                        Print("[AIEA] Profit Lock — SELL #", ticket,
+                              " netProfit=$", DoubleToString(netProfit, 2),
+                              " swap+comm=$", DoubleToString(swapAndComm, 2),
+                              " SL moved to ", DoubleToString(lockSL, digits),
+                              " (target $", DoubleToString(InpProfitLockTarget, 2), ")");
+                  }
+                  else if(InpVerbose)
+                     Print("[AIEA] Profit Lock — PositionModify failed for #", ticket,
+                           " err=", GetLastError());
+               }
+            }
+         }
+      }
+
+      // If profit lock was just applied, skip the ATR-based break-even/trailing
+      // this tick — they would undo our precise $-based SL.  On subsequent ticks
+      // the trailing stop can continue to tighten from the locked level.
+      if(profitLockApplied)
+         continue;
+
       // Break-even logic
       if(posType == POSITION_TYPE_BUY)
       {
          if(currentPrice - openPrice >= beTrigger && currentSL < openPrice)
          {
-            double newSL = NormalizeDouble(openPrice + point * 5, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS));
+            double newSL = NormalizeDouble(openPrice + point * 5, digits);
             trade.PositionModify(ticket, newSL, currentTP);
          }
 
@@ -504,7 +620,7 @@ void ManageOpenPositions(const ParameterSet &params)
          if(trailingDist > 0.0)
          {
             double newSL = currentPrice - trailingDist;
-            newSL = NormalizeDouble(newSL, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS));
+            newSL = NormalizeDouble(newSL, digits);
             if(newSL > currentSL && newSL > openPrice)
             {
                trade.PositionModify(ticket, newSL, currentTP);
@@ -515,7 +631,7 @@ void ManageOpenPositions(const ParameterSet &params)
       {
          if(openPrice - currentPrice >= beTrigger && currentSL > openPrice)
          {
-            double newSL = NormalizeDouble(openPrice - point * 5, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS));
+            double newSL = NormalizeDouble(openPrice - point * 5, digits);
             trade.PositionModify(ticket, newSL, currentTP);
          }
 
@@ -523,7 +639,7 @@ void ManageOpenPositions(const ParameterSet &params)
          if(trailingDist > 0.0)
          {
             double newSL = currentPrice + trailingDist;
-            newSL = NormalizeDouble(newSL, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS));
+            newSL = NormalizeDouble(newSL, digits);
             if(currentSL == 0.0 || (newSL < currentSL && newSL < openPrice))
             {
                trade.PositionModify(ticket, newSL, currentTP);
@@ -1404,13 +1520,19 @@ void PrintHeartbeat()
    if(hasSnapshot)
       Print("[AIEA] Indicators — ", indicatorSummary);
    Print("[AIEA] Waiting for: ", waitingReason);
+   string plStatus = InpEnableProfitLock
+      ? StringFormat("ProfitLock: ON (trigger $%.1f -> lock $%.1f)",
+                     InpProfitLockTrigger, InpProfitLockTarget)
+      : "ProfitLock: OFF";
+
    Print("[AIEA] Status: ", status,
          (haltReason != "" ? " (" + haltReason + ")" : ""),
          " | Equity: ", DoubleToString(equity, 2),
          " | Pos: ", positions, "/", ps.maxOpenPositions,
          " | Spread: ", spread, "/", (int)ps.maxSpreadPoints,
          " | Hour: ", dt.hour, " (", (inHours ? "IN" : "OUT"), ")",
-         " | Profile: #", ps.id, " (", ps.name, ")");
+         " | Profile: #", ps.id, " (", ps.name, ")",
+         " | ", plStatus);
 
    // Update chart status panel
    if(hasSnapshot)
