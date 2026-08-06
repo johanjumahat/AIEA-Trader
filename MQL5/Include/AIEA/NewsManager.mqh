@@ -16,6 +16,14 @@
 #include "Config.mqh"
 #include <Trade/Trade.mqh>
 
+//--- News display/fetch filter — which importance levels to include
+enum ENUM_NEWS_IMPORTANCE_FILTER
+{
+   NEWS_IMPORTANCE_ALL       = 0,  // All (Low + Medium + High)
+   NEWS_IMPORTANCE_MEDIUM_UP = 1,  // Medium & High only
+   NEWS_IMPORTANCE_HIGH_ONLY = 2   // High impact only
+};
+
 //==================================================================
 //  NEWS DATA STRUCTURES
 //==================================================================
@@ -72,6 +80,11 @@ private:
    int            m_magicNumber; // Magic number filter (set via CheckNewsProtection)
    bool           m_verbose;     // Verbose logging flag
 
+   ENUM_NEWS_IMPORTANCE_FILTER m_importanceFilter; // Which impact levels to fetch/show
+   string         m_countryFilter;                 // "ALL" or comma list e.g. "US,EU,GB"
+
+   bool   MatchesCountryFilter(string countryCode, string currency);
+
    bool   FindNextHighImpactEvent(datetime &eventTime);
    void   ApplySLProtection();
    void   RemoveSLProtection();
@@ -93,6 +106,8 @@ public:
    void   SetProtectMinutes(int minutes) { m_protectMinutes = minutes; }
    void   SetReleaseMinutes(int minutes) { m_releaseMinutes = minutes; }
    void   SetProtectMode(int mode) { m_protectMode = (mode > 0); }
+   void   SetImportanceFilter(ENUM_NEWS_IMPORTANCE_FILTER filter) { m_importanceFilter = filter; }
+   void   SetCountryFilter(string filter) { m_countryFilter = filter; }
    string GetNewsDisplayString();
    string GetWarningMessage();
    string GetTodaysNewsSummary();
@@ -120,11 +135,36 @@ CNewsManager::CNewsManager()
    m_symbol = "";
    m_magicNumber = 0;
    m_verbose = true;
+   m_importanceFilter = NEWS_IMPORTANCE_MEDIUM_UP;
+   m_countryFilter = "ALL";
 }
 
 //--- Destructor
 CNewsManager::~CNewsManager()
 {
+}
+
+//--- Check whether a country/currency matches the configured filter
+//--- m_countryFilter == "ALL" matches everything. Otherwise it's a comma
+//--- separated list of country or currency codes, e.g. "US,EU,GB"
+bool CNewsManager::MatchesCountryFilter(string countryCode, string currency)
+{
+   if(m_countryFilter == "" || m_countryFilter == "ALL")
+      return true;
+
+   string parts[];
+   int n = StringSplit(m_countryFilter, ',', parts);
+   for(int i = 0; i < n; i++)
+   {
+      string tok = parts[i];
+      StringTrimLeft(tok);
+      StringTrimRight(tok);
+      if(tok == "")
+         continue;
+      if(tok == countryCode || tok == currency)
+         return true;
+   }
+   return false;
 }
 
 //--- Fetch today's economic news using MT5 built-in calendar
@@ -147,17 +187,26 @@ bool CNewsManager::FetchTodaysNews()
       return false;
    }
 
+   // Translate the importance filter into a minimum importance level
+   ENUM_CALENDAR_EVENT_IMPORTANCE minImportance = CALENDAR_IMPORTANCE_MODERATE;
+   if(m_importanceFilter == NEWS_IMPORTANCE_ALL)       minImportance = CALENDAR_IMPORTANCE_LOW;
+   else if(m_importanceFilter == NEWS_IMPORTANCE_MEDIUM_UP) minImportance = CALENDAR_IMPORTANCE_MODERATE;
+   else if(m_importanceFilter == NEWS_IMPORTANCE_HIGH_ONLY) minImportance = CALENDAR_IMPORTANCE_HIGH;
+
    for(int i = 0; i < count && m_eventCount < MAX_NEWS_EVENTS; i++)
    {
       MqlCalendarEvent event;
       if(!CalendarEventById(values[i].event_id, event))
          continue;
 
-      if(event.importance < CALENDAR_IMPORTANCE_MODERATE)
+      if(event.importance < minImportance)
          continue;
 
       MqlCalendarCountry country;
       if(!CalendarCountryById(event.country_id, country))
+         continue;
+
+      if(!MatchesCountryFilter(country.code, country.currency))
          continue;
 
       NewsEvent ne;
@@ -293,19 +342,28 @@ string CNewsManager::GetNewsDisplayString()
    {
       if(m_events[i].time >= now - 3600)
       {
-         string impStr = (m_events[i].importance == 3 ? "HIGH" : "MED");
+         string impStr;
+         if(m_events[i].importance == (int)CALENDAR_IMPORTANCE_HIGH)      impStr = "HIGH";
+         else if(m_events[i].importance == (int)CALENDAR_IMPORTANCE_MODERATE) impStr = "MED ";
+         else                                                              impStr = "LOW ";
+
          string timeStr = TimeToString(m_events[i].time, TIME_MINUTES);
 
          int minsAway = (int)((m_events[i].time - now) / 60);
          string relStr;
          if(minsAway > 0)
-            relStr = StringFormat(" (in %dh%dm)", minsAway / 60, minsAway % 60);
+            relStr = StringFormat("in %dh%02dm", minsAway / 60, minsAway % 60);
          else if(minsAway == 0)
-            relStr = " (NOW)";
+            relStr = "NOW";
          else
-            relStr = StringFormat(" (%dm ago)", -minsAway);
+            relStr = StringFormat("%dm ago", -minsAway);
 
-         result += StringFormat("%s %s %s%s\n", timeStr, impStr, m_events[i].country, relStr);
+         // Fixed-width columns so the table lines up on a monospace font:
+         // Time | Impact | Country | Relative time
+         string ctry = m_events[i].country;
+         if(StringLen(ctry) < 3) ctry += StringSubstr("   ", 0, 3 - StringLen(ctry));
+
+         result += StringFormat("%s  %s %s %s\n", timeStr, impStr, ctry, relStr);
          shown++;
       }
    }
