@@ -69,6 +69,8 @@ input bool   InpEnableNewsFilter  = true;           // Enable economic news filt
 input int    InpNewsWarningHours  = 2;               // Hours before high-impact news to warn
 input int    InpNewsBlockMinutes  = 15;              // Block trades N min before/after high-impact news
 input int    InpNewsRefreshMinutes = 30;             // How often to refresh news calendar (minutes)
+input ENUM_NEWS_IMPORTANCE_FILTER InpNewsImportance = NEWS_IMPORTANCE_MEDIUM_UP; // Which impact levels to show/track
+input string InpNewsCountryFilter = "ALL";           // Country/currency filter: ALL or e.g. "US,EU,GB"
 
 input group "=== News Trade Protection ==="
 input bool   InpNewsProtectTrades = true;            // Protect open trades before high-impact news
@@ -804,6 +806,13 @@ double AutoDetectMaxSpread()
 //+------------------------------------------------------------------+
 int OnInit()
 {
+   // Defensive cleanup: remove any stray default-named chart objects
+   // (e.g. a leftover "Label" object from manual chart edits or an old
+   // debug build) that aren't part of our AIEA_/AIEA_SP_ prefixed set —
+   // these can visually collide with our dashboard panels.
+   if(ObjectFind(0, "Label") >= 0)
+      ObjectDelete(0, "Label");
+
    // Determine symbol
    g_symbol = (InpSymbol == "") ? _Symbol : InpSymbol;
 
@@ -892,7 +901,10 @@ int OnInit()
       newsManager.SetProtectMinutes(InpNewsProtectMinutes);
       newsManager.SetReleaseMinutes(InpNewsReleaseMinutes);
       newsManager.SetProtectMode(InpNewsProtectTrades ? 1 : 0);
-      Print("[AIEA] Fetching today's economic calendar...");
+      newsManager.SetImportanceFilter(InpNewsImportance);
+      newsManager.SetCountryFilter(InpNewsCountryFilter);
+      Print("[AIEA] Fetching today's economic calendar (importance=", EnumToString(InpNewsImportance),
+            ", countries=", InpNewsCountryFilter, ")...");
       newsManager.FetchTodaysNews();
    }
 
@@ -992,6 +1004,32 @@ void SP_UpdateLabel(string name, string text, color clr)
    }
 }
 
+//--- Update a two-line wrapped label pair (baseName+"1", baseName+"2").
+//--- Splits fullText near maxLineLen at the nearest space so long
+//--- indicator/status strings never overflow the panel's edge.
+void SP_UpdateWrappedLabel(string baseName, string fullText, color clr, int maxLineLen = 46)
+{
+   if(StringLen(fullText) > maxLineLen)
+   {
+      int splitPos = maxLineLen;
+      for(int i = maxLineLen; i > (int)(maxLineLen * 0.6); i--)
+      {
+         if(StringGetCharacter(fullText, i) == ' ')
+         {
+            splitPos = i;
+            break;
+         }
+      }
+      SP_UpdateLabel(baseName + "1", StringSubstr(fullText, 0, splitPos), clr);
+      SP_UpdateLabel(baseName + "2", StringSubstr(fullText, splitPos), clr);
+   }
+   else
+   {
+      SP_UpdateLabel(baseName + "1", fullText, clr);
+      SP_UpdateLabel(baseName + "2", "", clr);
+   }
+}
+
 bool g_statusPanelCreated = false;
 int  g_indicatorFailStreak = 0;
 
@@ -999,14 +1037,15 @@ void CreateStatusPanel()
 {
    if(g_statusPanelCreated) return;
 
-   // Background panel — below the dashboard
-   SP_CreateRect("bg", 10, 350, 380, 210, C'20,20,30');
+   // Background panel — below the dashboard (widened + heightened to fit
+   // the two-line indicators row without overflowing into the chart)
+   SP_CreateRect("bg", 10, 350, 460, 236, C'20,20,30');
 
    // Title
    SP_CreateLabel("title", "AIEA — Market Status", 20, 360, clrGold, 12);
 
    // Separator
-   SP_CreateLabel("sep1", "─────────────────────────", 20, 380, clrDimGray);
+   SP_CreateLabel("sep1", "──────────────────────────────", 20, 380, clrDimGray);
 
    // Trend section
    SP_CreateLabel("trend_lbl", "TREND:", 20, 395, clrGray);
@@ -1016,24 +1055,25 @@ void CreateStatusPanel()
    SP_CreateLabel("conf_lbl", "CONFIDENCE:", 20, 415, clrGray);
    SP_CreateLabel("conf_val", "Buy: -- | Sell: -- | Need: --", 130, 415, clrWhite);
 
-   // Indicators line
+   // Indicators — wrapped across two lines so long strings never overflow
    SP_CreateLabel("ind_lbl", "INDICATORS:", 20, 435, clrGray);
-   SP_CreateLabel("ind_val", "Loading...", 130, 435, clrSilver);
+   SP_CreateLabel("ind_val1", "Loading...", 130, 435, clrSilver, 9);
+   SP_CreateLabel("ind_val2", "", 130, 450, clrSilver, 9);
 
    // Separator
-   SP_CreateLabel("sep2", "─────────────────────────", 20, 455, clrDimGray);
+   SP_CreateLabel("sep2", "──────────────────────────────", 20, 470, clrDimGray);
 
    // Waiting for section
-   SP_CreateLabel("wait_lbl", "WAITING FOR:", 20, 470, clrGray, 11);
-   SP_CreateLabel("wait_val1", "Initializing...", 20, 490, clrYellow);
-   SP_CreateLabel("wait_val2", "", 20, 508, clrYellow);
+   SP_CreateLabel("wait_lbl", "WAITING FOR:", 20, 485, clrGray, 11);
+   SP_CreateLabel("wait_val1", "Initializing...", 20, 505, clrYellow);
+   SP_CreateLabel("wait_val2", "", 20, 523, clrYellow);
 
    // Separator
-   SP_CreateLabel("sep3", "─────────────────────────", 20, 528, clrDimGray);
+   SP_CreateLabel("sep3", "──────────────────────────────", 20, 543, clrDimGray);
 
    // Server time / hours
-   SP_CreateLabel("time_lbl", "SERVER TIME:", 20, 543, clrGray);
-   SP_CreateLabel("time_val", "--:-- (hours: --)", 130, 543, clrSilver);
+   SP_CreateLabel("time_lbl", "SERVER TIME:", 20, 558, clrGray);
+   SP_CreateLabel("time_val", "--:-- (hours: --)", 130, 558, clrSilver);
 
    g_statusPanelCreated = true;
 }
@@ -1070,35 +1110,16 @@ void UpdateStatusPanel(const ParameterSet &ps, const IndicatorSnapshot &snap,
       case REGIME_VOLATILE:  regimeStr = "Volat"; break;
       default:               regimeStr = "?";     break;
    }
-   SP_UpdateLabel("ind_val",
+   SP_UpdateWrappedLabel("ind_val",
       StringFormat("RSI %.1f | MA %s | MACD %s | Stoch %.1f | Vol %.2f%% | %s",
          snap.rsi,
          (snap.maFast > snap.maSlow ? "↑" : "↓"),
          (snap.macdMain > snap.macdSignal ? "↑" : "↓"),
          snap.stochMain, snap.volatilityPercent, regimeStr),
-      clrSilver);
+      clrSilver, 40);
 
    // Waiting reason — split into 2 lines if long
-   if(StringLen(waitingReason) > 50)
-   {
-      int splitPos = 50;
-      // Find a space near position 50 to split cleanly
-      for(int i = 50; i > 30; i--)
-      {
-         if(StringGetCharacter(waitingReason, i) == ' ')
-         {
-            splitPos = i;
-            break;
-         }
-      }
-      SP_UpdateLabel("wait_val1", StringSubstr(waitingReason, 0, splitPos), clrYellow);
-      SP_UpdateLabel("wait_val2", StringSubstr(waitingReason, splitPos), clrYellow);
-   }
-   else
-   {
-      SP_UpdateLabel("wait_val1", waitingReason, clrYellow);
-      SP_UpdateLabel("wait_val2", "", clrYellow);
-   }
+   SP_UpdateWrappedLabel("wait_val", waitingReason, clrYellow, 50);
 
    // Server time + hours
    MqlDateTime dt;
@@ -1120,7 +1141,7 @@ void DestroyStatusPanel()
    if(!g_statusPanelCreated) return;
    string names[] = {"bg","title","sep1","sep2","sep3",
       "trend_lbl","trend_val","conf_lbl","conf_val",
-      "ind_lbl","ind_val","wait_lbl","wait_val1","wait_val2",
+      "ind_lbl","ind_val1","ind_val2","wait_lbl","wait_val1","wait_val2",
       "time_lbl","time_val"};
    for(int i = 0; i < ArraySize(names); i++)
    {
@@ -1402,27 +1423,13 @@ void PrintHeartbeat()
       CreateStatusPanel();
       SP_UpdateLabel("trend_val", "Not ready", clrOrange);
       SP_UpdateLabel("conf_val", "Buy: -- | Sell: -- | Need: --", clrSilver);
-      SP_UpdateLabel("ind_val", StringFormat("Bars available: %d | Synced: %s",
+      SP_UpdateWrappedLabel("ind_val", StringFormat("Bars available: %d | Synced: %s",
                         Bars(g_symbol, InpTimeframe),
                         (SeriesInfoInteger(g_symbol, InpTimeframe, SERIES_SYNCHRONIZED) ? "yes" : "NO")),
-                    clrSilver);
+                    clrSilver, 40);
 
       string reason = waitingReason; // set above from indicatorEngine.GetLastFailReason()
-      if(StringLen(reason) > 50)
-      {
-         int splitPos = 50;
-         for(int i = 50; i > 30; i--)
-         {
-            if(StringGetCharacter(reason, i) == ' ') { splitPos = i; break; }
-         }
-         SP_UpdateLabel("wait_val1", StringSubstr(reason, 0, splitPos), clrYellow);
-         SP_UpdateLabel("wait_val2", StringSubstr(reason, splitPos), clrYellow);
-      }
-      else
-      {
-         SP_UpdateLabel("wait_val1", reason, clrYellow);
-         SP_UpdateLabel("wait_val2", "", clrYellow);
-      }
+      SP_UpdateWrappedLabel("wait_val", reason, clrYellow, 50);
       ChartRedraw(0);
    }
 }
