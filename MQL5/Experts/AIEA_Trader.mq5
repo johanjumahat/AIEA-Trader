@@ -1153,43 +1153,45 @@ void CreateStatusPanel()
 {
    if(g_statusPanelCreated) return;
 
-   // Background panel — below the dashboard (widened + heightened to fit
-   // the two-line indicators row without overflowing into the chart)
-   SP_CreateRect("bg", 10, 350, 460, 236, C'20,20,30');
+   // Background panel — third box in the vertical stack, aligned (x=10,
+   // width=460) with the Dashboard box (y=20..240) and the News box
+   // (y=250..400) above it. Starts at y=410 (10px gap below the news box)
+   // so none of the three panels ever overlap.
+   SP_CreateRect("bg", 10, 410, 460, 200, C'20,20,30');
 
    // Title
-   SP_CreateLabel("title", "AIEA — Market Status", 20, 360, clrGold, 12);
+   SP_CreateLabel("title", "AIEA — Market Status", 20, 420, clrGold, 12);
 
    // Separator
-   SP_CreateLabel("sep1", "──────────────────────────────", 20, 380, clrDimGray);
+   SP_CreateLabel("sep1", "──────────────────────────────", 20, 438, clrDimGray);
 
    // Trend section
-   SP_CreateLabel("trend_lbl", "TREND:", 20, 395, clrGray);
-   SP_CreateLabel("trend_val", "Loading...", 130, 395, clrWhite, 11);
+   SP_CreateLabel("trend_lbl", "TREND:", 20, 452, clrGray);
+   SP_CreateLabel("trend_val", "Loading...", 130, 452, clrWhite, 11);
 
    // Confidence section
-   SP_CreateLabel("conf_lbl", "CONFIDENCE:", 20, 415, clrGray);
-   SP_CreateLabel("conf_val", "Buy: -- | Sell: -- | Need: --", 130, 415, clrWhite);
+   SP_CreateLabel("conf_lbl", "CONFIDENCE:", 20, 470, clrGray);
+   SP_CreateLabel("conf_val", "Buy: -- | Sell: -- | Need: --", 130, 470, clrWhite);
 
    // Indicators — wrapped across two lines so long strings never overflow
-   SP_CreateLabel("ind_lbl", "INDICATORS:", 20, 435, clrGray);
-   SP_CreateLabel("ind_val1", "Loading...", 130, 435, clrSilver, 9);
-   SP_CreateLabel("ind_val2", "", 130, 450, clrSilver, 9);
+   SP_CreateLabel("ind_lbl", "INDICATORS:", 20, 488, clrGray);
+   SP_CreateLabel("ind_val1", "Loading...", 130, 488, clrSilver, 9);
+   SP_CreateLabel("ind_val2", "", 130, 502, clrSilver, 9);
 
    // Separator
-   SP_CreateLabel("sep2", "──────────────────────────────", 20, 470, clrDimGray);
+   SP_CreateLabel("sep2", "──────────────────────────────", 20, 518, clrDimGray);
 
    // Waiting for section
-   SP_CreateLabel("wait_lbl", "WAITING FOR:", 20, 485, clrGray, 11);
-   SP_CreateLabel("wait_val1", "Initializing...", 20, 505, clrYellow);
-   SP_CreateLabel("wait_val2", "", 20, 523, clrYellow);
+   SP_CreateLabel("wait_lbl", "WAITING FOR:", 20, 532, clrGray, 11);
+   SP_CreateLabel("wait_val1", "Initializing...", 20, 550, clrYellow);
+   SP_CreateLabel("wait_val2", "", 20, 566, clrYellow);
 
    // Separator
-   SP_CreateLabel("sep3", "──────────────────────────────", 20, 543, clrDimGray);
+   SP_CreateLabel("sep3", "──────────────────────────────", 20, 582, clrDimGray);
 
    // Server time / hours
-   SP_CreateLabel("time_lbl", "SERVER TIME:", 20, 558, clrGray);
-   SP_CreateLabel("time_val", "--:-- (hours: --)", 130, 558, clrSilver);
+   SP_CreateLabel("time_lbl", "SERVER TIME:", 20, 596, clrGray);
+   SP_CreateLabel("time_val", "--:-- (hours: --)", 130, 596, clrSilver);
 
    g_statusPanelCreated = true;
 }
