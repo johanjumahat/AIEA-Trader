@@ -177,7 +177,7 @@ void CDashboard::UpdateWrappedLabel(string baseName, string fullText, color clr,
    else
    {
       UpdateLabel(baseName + "1", fullText, clr);
-      UpdateLabel(baseName + "2", "", clr);
+      UpdateLabel(baseName + "2", " ", clr);
    }
 }
 
@@ -194,10 +194,10 @@ void CDashboard::UpdateWrappedLabel(string baseName, string fullText, color clr,
 void CDashboard::Create()
 {
    //=== BOX 1: Account / Performance / Strategy (2-column) ===
-   CreateRect("bg", 10, 20, 460, 220, C'20,20,30');
+   CreateRect("bg", 10, 20, 400, 220, C'20,20,30');
 
    CreateLabel("title", "AIEA Trader — Dashboard", 20, 30, clrGold, 12, "Consolas");
-   CreateLabel("sep1", "──────────────────────────────", 20, 48, clrDimGray, 10, "Consolas");
+   CreateLabel("sep1", "──────────────────────", 20, 48, clrDimGray, 10, "Consolas");
 
    // LEFT column — Account (label x=20, value x=140)
    CreateLabel("equity_lbl", "Equity:", 20, 62, clrGray, 10, "Consolas");
@@ -213,20 +213,20 @@ void CDashboard::Create()
    CreateLabel("daily_pnl_val", "---", 140, 110, clrWhite, 10, "Consolas");
 
    // RIGHT column — Performance (label x=250, value x=370), same rows as left
-   CreateLabel("trades_lbl", "Total Trades:", 250, 62, clrGray, 10, "Consolas");
-   CreateLabel("trades_val", "0", 370, 62, clrWhite, 10, "Consolas");
+   CreateLabel("trades_lbl", "Total Trades:", 220, 62, clrGray, 10, "Consolas");
+   CreateLabel("trades_val", "0", 330, 62, clrWhite, 10, "Consolas");
 
-   CreateLabel("winrate_lbl", "Win Rate:", 250, 78, clrGray, 10, "Consolas");
-   CreateLabel("winrate_val", "---", 370, 78, clrWhite, 10, "Consolas");
+   CreateLabel("winrate_lbl", "Win Rate:", 220, 78, clrGray, 10, "Consolas");
+   CreateLabel("winrate_val", "---", 330, 78, clrWhite, 10, "Consolas");
 
-   CreateLabel("pf_lbl", "Profit Factor:", 250, 94, clrGray, 10, "Consolas");
-   CreateLabel("pf_val", "---", 370, 94, clrWhite, 10, "Consolas");
+   CreateLabel("pf_lbl", "Profit Factor:", 220, 94, clrGray, 10, "Consolas");
+   CreateLabel("pf_val", "---", 330, 94, clrWhite, 10, "Consolas");
 
-   CreateLabel("exp_lbl", "Expectancy:", 250, 110, clrGray, 10, "Consolas");
-   CreateLabel("exp_val", "---", 370, 110, clrWhite, 10, "Consolas");
+   CreateLabel("exp_lbl", "Expectancy:", 220, 110, clrGray, 10, "Consolas");
+   CreateLabel("exp_val", "---", 330, 110, clrWhite, 10, "Consolas");
 
    // Full-width separator
-   CreateLabel("sep2", "──────────────────────────────", 20, 128, clrDimGray, 10, "Consolas");
+   CreateLabel("sep2", "──────────────────────", 20, 128, clrDimGray, 10, "Consolas");
 
    // Strategy section (full width, single column)
    CreateLabel("profile_lbl", "Active Profile:", 20, 142, clrGray, 10, "Consolas");
@@ -238,16 +238,16 @@ void CDashboard::Create()
    CreateLabel("status_lbl", "Status:", 20, 174, clrGray, 10, "Consolas");
    CreateLabel("status_val", "ACTIVE", 140, 174, clrLime, 10, "Consolas");
 
-   CreateLabel("halt_lbl", "", 20, 190, clrRed, 10, "Consolas");
+   CreateLabel("halt_lbl", " ", 20, 190, clrRed, 10, "Consolas");
 
-   CreateLabel("sep3", "──────────────────────────────", 20, 206, clrDimGray, 10, "Consolas");
+   CreateLabel("sep3", "──────────────────────", 20, 206, clrDimGray, 10, "Consolas");
 
    //=== BOX 2: Standalone Economic News panel ===
    // Starts 10px below Box 1 (20 + 220 + 10 = 250), same x/width for alignment.
-   CreateRect("news_bg", 10, 250, 460, 150, C'20,20,30');
+   CreateRect("news_bg", 10, 250, 400, 150, C'20,20,30');
 
    CreateLabel("news_title", "⚠ ECONOMIC NEWS", 20, 260, clrGold, 11, "Consolas");
-   CreateLabel("news_sep1", "──────────────────────────────", 20, 278, clrDimGray, 10, "Consolas");
+   CreateLabel("news_sep1", "──────────────────────", 20, 278, clrDimGray, 10, "Consolas");
 
    // Table header for the fixed-width columns produced by GetNewsDisplayString()
    CreateLabel("news_header", "TIME   IMP  CTY  ETA", 20, 292, clrGray, 9, "Consolas");
@@ -256,11 +256,11 @@ void CDashboard::Create()
    CreateLabel("news_line2", "---", 20, 320, clrSilver, 9, "Consolas");
    CreateLabel("news_line3", "---", 20, 334, clrSilver, 9, "Consolas");
 
-   CreateLabel("news_sep2", "──────────────────────────────", 20, 352, clrDimGray, 10, "Consolas");
+   CreateLabel("news_sep2", "──────────────────────", 20, 352, clrDimGray, 10, "Consolas");
 
    // Warning/protection line — wraps across 2 lines so long messages never overflow
-   CreateLabel("news_warning1", "", 20, 366, clrRed, 10, "Consolas");
-   CreateLabel("news_warning2", "", 20, 381, clrRed, 10, "Consolas");
+   CreateLabel("news_warning1", " ", 20, 366, clrRed, 10, "Consolas");
+   CreateLabel("news_warning2", " ", 20, 381, clrRed, 10, "Consolas");
 }
 
 //--- Update dashboard values
@@ -321,7 +321,7 @@ void CDashboard::Update()
    else
    {
       UpdateLabel("status_val", "ACTIVE", clrLime);
-      UpdateLabel("halt_lbl", "", clrBlack);
+      UpdateLabel("halt_lbl", " ", clrBlack);
    }
 
    // === NEWS SECTION (standalone box) ===
@@ -340,11 +340,11 @@ void CDashboard::Update()
       string protStatus = m_newsManager.GetProtectionStatus();
 
       if(protStatus != "")
-         UpdateWrappedLabel("news_warning", protStatus, clrOrange, 44);
+         UpdateWrappedLabel("news_warning", protStatus, clrOrange, 54);
       else if(warning != "")
-         UpdateWrappedLabel("news_warning", warning, clrRed, 44);
+         UpdateWrappedLabel("news_warning", warning, clrRed, 54);
       else
-         UpdateWrappedLabel("news_warning", "", clrBlack, 44);
+         UpdateWrappedLabel("news_warning", " ", clrBlack, 54);
    }
 }
 
