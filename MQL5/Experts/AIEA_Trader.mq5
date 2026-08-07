@@ -73,7 +73,7 @@ input ENUM_NEWS_IMPORTANCE_FILTER InpNewsImportance = NEWS_IMPORTANCE_MEDIUM_UP;
 input string InpNewsCountryFilter = "ALL";           // Country/currency filter: ALL or e.g. "US,EU,GB"
 
 input group "=== Profit Lock ==="
-input bool   InpEnableProfitLock  = true;            // Enable profit-lock SL (move SL to lock $ profit)
+input bool   InpEnableProfitLock  = false;           // Enable profit-lock SL (move SL to lock $ profit)
 input double InpProfitLockTrigger = 2.0;            // Trigger: when net profit (incl. swap) exceeds this ($)
 input double InpProfitLockTarget  = 1.0;            // Lock: move SL to secure this much net profit ($)
 input int    InpProfitLockStopLevel = 0;            // Min stop level in points (0 = auto from broker)
@@ -1123,7 +1123,7 @@ void SP_UpdateLabel(string name, string text, color clr)
 //--- Update a two-line wrapped label pair (baseName+"1", baseName+"2").
 //--- Splits fullText near maxLineLen at the nearest space so long
 //--- indicator/status strings never overflow the panel's edge.
-void SP_UpdateWrappedLabel(string baseName, string fullText, color clr, int maxLineLen = 46)
+void SP_UpdateWrappedLabel(string baseName, string fullText, color clr, int maxLineLen = 54)
 {
    if(StringLen(fullText) > maxLineLen)
    {
@@ -1142,7 +1142,7 @@ void SP_UpdateWrappedLabel(string baseName, string fullText, color clr, int maxL
    else
    {
       SP_UpdateLabel(baseName + "1", fullText, clr);
-      SP_UpdateLabel(baseName + "2", "", clr);
+      SP_UpdateLabel(baseName + "2", " ", clr);
    }
 }
 
@@ -1157,13 +1157,13 @@ void CreateStatusPanel()
    // width=460) with the Dashboard box (y=20..240) and the News box
    // (y=250..400) above it. Starts at y=410 (10px gap below the news box)
    // so none of the three panels ever overlap.
-   SP_CreateRect("bg", 10, 410, 460, 200, C'20,20,30');
+   SP_CreateRect("bg", 10, 410, 400, 200, C'20,20,30');
 
    // Title
    SP_CreateLabel("title", "AIEA — Market Status", 20, 420, clrGold, 12);
 
    // Separator
-   SP_CreateLabel("sep1", "──────────────────────────────", 20, 438, clrDimGray);
+   SP_CreateLabel("sep1", "──────────────────────", 20, 438, clrDimGray);
 
    // Trend section
    SP_CreateLabel("trend_lbl", "TREND:", 20, 452, clrGray);
@@ -1176,18 +1176,18 @@ void CreateStatusPanel()
    // Indicators — wrapped across two lines so long strings never overflow
    SP_CreateLabel("ind_lbl", "INDICATORS:", 20, 488, clrGray);
    SP_CreateLabel("ind_val1", "Loading...", 130, 488, clrSilver, 9);
-   SP_CreateLabel("ind_val2", "", 130, 502, clrSilver, 9);
+   SP_CreateLabel("ind_val2", " ", 130, 502, clrSilver, 9);
 
    // Separator
-   SP_CreateLabel("sep2", "──────────────────────────────", 20, 518, clrDimGray);
+   SP_CreateLabel("sep2", "──────────────────────", 20, 518, clrDimGray);
 
    // Waiting for section
    SP_CreateLabel("wait_lbl", "WAITING FOR:", 20, 532, clrGray, 11);
    SP_CreateLabel("wait_val1", "Initializing...", 20, 550, clrYellow);
-   SP_CreateLabel("wait_val2", "", 20, 566, clrYellow);
+   SP_CreateLabel("wait_val2", " ", 20, 566, clrYellow);
 
    // Separator
-   SP_CreateLabel("sep3", "──────────────────────────────", 20, 582, clrDimGray);
+   SP_CreateLabel("sep3", "──────────────────────", 20, 582, clrDimGray);
 
    // Server time / hours
    SP_CreateLabel("time_lbl", "SERVER TIME:", 20, 596, clrGray);
@@ -1237,7 +1237,7 @@ void UpdateStatusPanel(const ParameterSet &ps, const IndicatorSnapshot &snap,
       clrSilver, 40);
 
    // Waiting reason — split into 2 lines if long
-   SP_UpdateWrappedLabel("wait_val", waitingReason, clrYellow, 50);
+   SP_UpdateWrappedLabel("wait_val", waitingReason, clrYellow, 58);
 
    // Server time + hours
    MqlDateTime dt;
@@ -1553,7 +1553,7 @@ void PrintHeartbeat()
                     clrSilver, 40);
 
       string reason = waitingReason; // set above from indicatorEngine.GetLastFailReason()
-      SP_UpdateWrappedLabel("wait_val", reason, clrYellow, 50);
+      SP_UpdateWrappedLabel("wait_val", reason, clrYellow, 58);
       ChartRedraw(0);
    }
 }
