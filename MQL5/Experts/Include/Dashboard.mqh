@@ -60,6 +60,7 @@ private:
    void   CreateRect(string name, int x, int y, int width, int height,
                      color bgClr);
    void   UpdateLabel(string name, string text, color clr = clrWhite);
+   void   UpdateWrappedLabel(string baseName, string fullText, color clr, int maxLineLen = 46);
 
 public:
    CDashboard();
@@ -155,77 +156,111 @@ void CDashboard::UpdateLabel(string name, string text, color clr)
    }
 }
 
+//--- Update a label that may need to wrap across 2 pre-created lines
+// (baseName + "1" / baseName + "2") so long text never overflows the panel.
+void CDashboard::UpdateWrappedLabel(string baseName, string fullText, color clr, int maxLineLen)
+{
+   if(StringLen(fullText) > maxLineLen)
+   {
+      int splitPos = maxLineLen;
+      for(int i = maxLineLen; i > maxLineLen - 20 && i > 0; i--)
+      {
+         if(StringGetCharacter(fullText, i) == ' ')
+         {
+            splitPos = i;
+            break;
+         }
+      }
+      UpdateLabel(baseName + "1", StringSubstr(fullText, 0, splitPos), clr);
+      UpdateLabel(baseName + "2", StringSubstr(fullText, splitPos), clr);
+   }
+   else
+   {
+      UpdateLabel(baseName + "1", fullText, clr);
+      UpdateLabel(baseName + "2", "", clr);
+   }
+}
+
 //--- Create the dashboard
+// Layout: two aligned, non-overlapping boxes, both x=10, width=460, stacked
+// vertically with a 10px gap between them:
+//   Box 1 (y=20..240):  Account + Performance stats — split into LEFT/RIGHT
+//                        columns so it takes half the vertical space of the
+//                        old single-column layout, then a full-width Strategy
+//                        row underneath.
+//   Box 2 (y=250..400): Standalone Economic News panel (previously crammed
+//                        into the bottom of Box 1, causing overlap with the
+//                        separate Market Status panel below it).
 void CDashboard::Create()
 {
-   // Background panel
-   CreateRect("bg", 10, 20, 380, 420, C'20,20,30');
+   //=== BOX 1: Account / Performance / Strategy (2-column) ===
+   CreateRect("bg", 10, 20, 460, 220, C'20,20,30');
 
-   // Title
    CreateLabel("title", "AIEA Trader — Dashboard", 20, 30, clrGold, 12, "Consolas");
+   CreateLabel("sep1", "──────────────────────────────", 20, 48, clrDimGray, 10, "Consolas");
 
-   // Separator
-   CreateLabel("sep1", "─────────────────────────", 20, 50, clrDimGray, 10, "Consolas");
+   // LEFT column — Account (label x=20, value x=140)
+   CreateLabel("equity_lbl", "Equity:", 20, 62, clrGray, 10, "Consolas");
+   CreateLabel("equity_val", "---", 140, 62, clrWhite, 10, "Consolas");
 
-   // Account section
-   CreateLabel("equity_lbl", "Equity:", 20, 65, clrGray, 10, "Consolas");
-   CreateLabel("equity_val", "---", 150, 65, clrWhite, 10, "Consolas");
+   CreateLabel("balance_lbl", "Balance:", 20, 78, clrGray, 10, "Consolas");
+   CreateLabel("balance_val", "---", 140, 78, clrWhite, 10, "Consolas");
 
-   CreateLabel("balance_lbl", "Balance:", 20, 82, clrGray, 10, "Consolas");
-   CreateLabel("balance_val", "---", 150, 82, clrWhite, 10, "Consolas");
+   CreateLabel("dd_lbl", "Drawdown:", 20, 94, clrGray, 10, "Consolas");
+   CreateLabel("dd_val", "---", 140, 94, clrWhite, 10, "Consolas");
 
-   CreateLabel("dd_lbl", "Drawdown:", 20, 99, clrGray, 10, "Consolas");
-   CreateLabel("dd_val", "---", 150, 99, clrWhite, 10, "Consolas");
+   CreateLabel("daily_pnl_lbl", "Daily P&L:", 20, 110, clrGray, 10, "Consolas");
+   CreateLabel("daily_pnl_val", "---", 140, 110, clrWhite, 10, "Consolas");
 
-   CreateLabel("daily_pnl_lbl", "Daily P&L:", 20, 116, clrGray, 10, "Consolas");
-   CreateLabel("daily_pnl_val", "---", 150, 116, clrWhite, 10, "Consolas");
+   // RIGHT column — Performance (label x=250, value x=370), same rows as left
+   CreateLabel("trades_lbl", "Total Trades:", 250, 62, clrGray, 10, "Consolas");
+   CreateLabel("trades_val", "0", 370, 62, clrWhite, 10, "Consolas");
 
-   // Separator
-   CreateLabel("sep2", "─────────────────────────", 20, 135, clrDimGray, 10, "Consolas");
+   CreateLabel("winrate_lbl", "Win Rate:", 250, 78, clrGray, 10, "Consolas");
+   CreateLabel("winrate_val", "---", 370, 78, clrWhite, 10, "Consolas");
 
-   // Performance section
-   CreateLabel("trades_lbl", "Total Trades:", 20, 150, clrGray, 10, "Consolas");
-   CreateLabel("trades_val", "0", 150, 150, clrWhite, 10, "Consolas");
+   CreateLabel("pf_lbl", "Profit Factor:", 250, 94, clrGray, 10, "Consolas");
+   CreateLabel("pf_val", "---", 370, 94, clrWhite, 10, "Consolas");
 
-   CreateLabel("winrate_lbl", "Win Rate:", 20, 167, clrGray, 10, "Consolas");
-   CreateLabel("winrate_val", "---", 150, 167, clrWhite, 10, "Consolas");
+   CreateLabel("exp_lbl", "Expectancy:", 250, 110, clrGray, 10, "Consolas");
+   CreateLabel("exp_val", "---", 370, 110, clrWhite, 10, "Consolas");
 
-   CreateLabel("pf_lbl", "Profit Factor:", 20, 184, clrGray, 10, "Consolas");
-   CreateLabel("pf_val", "---", 150, 184, clrWhite, 10, "Consolas");
+   // Full-width separator
+   CreateLabel("sep2", "──────────────────────────────", 20, 128, clrDimGray, 10, "Consolas");
 
-   CreateLabel("exp_lbl", "Expectancy:", 20, 201, clrGray, 10, "Consolas");
-   CreateLabel("exp_val", "---", 150, 201, clrWhite, 10, "Consolas");
+   // Strategy section (full width, single column)
+   CreateLabel("profile_lbl", "Active Profile:", 20, 142, clrGray, 10, "Consolas");
+   CreateLabel("profile_val", "---", 140, 142, clrAqua, 10, "Consolas");
 
-   // Separator
-   CreateLabel("sep3", "─────────────────────────", 20, 220, clrDimGray, 10, "Consolas");
+   CreateLabel("profile_score_lbl", "Profile Score:", 20, 158, clrGray, 10, "Consolas");
+   CreateLabel("profile_score_val", "---", 140, 158, clrWhite, 10, "Consolas");
 
-   // Strategy section
-   CreateLabel("profile_lbl", "Active Profile:", 20, 235, clrGray, 10, "Consolas");
-   CreateLabel("profile_val", "---", 150, 235, clrAqua, 10, "Consolas");
+   CreateLabel("status_lbl", "Status:", 20, 174, clrGray, 10, "Consolas");
+   CreateLabel("status_val", "ACTIVE", 140, 174, clrLime, 10, "Consolas");
 
-   CreateLabel("profile_score_lbl", "Profile Score:", 20, 252, clrGray, 10, "Consolas");
-   CreateLabel("profile_score_val", "---", 150, 252, clrWhite, 10, "Consolas");
+   CreateLabel("halt_lbl", "", 20, 190, clrRed, 10, "Consolas");
 
-   CreateLabel("status_lbl", "Status:", 20, 269, clrGray, 10, "Consolas");
-   CreateLabel("status_val", "ACTIVE", 150, 269, clrLime, 10, "Consolas");
+   CreateLabel("sep3", "──────────────────────────────", 20, 206, clrDimGray, 10, "Consolas");
 
-   CreateLabel("halt_lbl", "", 20, 286, clrRed, 10, "Consolas");
+   //=== BOX 2: Standalone Economic News panel ===
+   // Starts 10px below Box 1 (20 + 220 + 10 = 250), same x/width for alignment.
+   CreateRect("news_bg", 10, 250, 460, 150, C'20,20,30');
 
-   // Separator
-   CreateLabel("sep4", "─────────────────────────", 20, 305, clrDimGray, 10, "Consolas");
+   CreateLabel("news_title", "⚠ ECONOMIC NEWS", 20, 260, clrGold, 11, "Consolas");
+   CreateLabel("news_sep1", "──────────────────────────────", 20, 278, clrDimGray, 10, "Consolas");
 
-   // News section
-   CreateLabel("news_title", "⚠ ECONOMIC NEWS", 20, 320, clrGold, 10, "Consolas");
-   CreateLabel("news_line1", "---", 20, 337, clrSilver, 9, "Consolas");
-   CreateLabel("news_line2", "---", 20, 352, clrSilver, 9, "Consolas");
-   CreateLabel("news_line3", "---", 20, 367, clrSilver, 9, "Consolas");
-   CreateLabel("news_warning", "", 20, 384, clrRed, 10, "Consolas");
+   // Table header for the fixed-width columns produced by GetNewsDisplayString()
+   CreateLabel("news_header", "TIME   IMP  CTY  ETA", 20, 292, clrGray, 9, "Consolas");
 
-   // Separator
-   CreateLabel("sep5", "─────────────────────────", 20, 402, clrDimGray, 10, "Consolas");
+   CreateLabel("news_line1", "---", 20, 306, clrSilver, 9, "Consolas");
+   CreateLabel("news_line2", "---", 20, 320, clrSilver, 9, "Consolas");
+   CreateLabel("news_line3", "---", 20, 334, clrSilver, 9, "Consolas");
 
-   // Footer
-   CreateLabel("footer", "AIEA Trader v0.0.1", 20, 417, clrDimGray, 8, "Consolas");
+   CreateLabel("news_sep2", "──────────────────────────────", 20, 352, clrDimGray, 10, "Consolas");
+
+   // Warning/protection line — wraps across 2 lines so long messages never overflow
+   CreateLabel("news_warning1", "", 20, 366, clrRed, 10, "Consolas");
+   CreateLabel("news_warning2", "", 20, 381, clrRed, 10, "Consolas");
 }
 
 //--- Update dashboard values
@@ -289,7 +324,7 @@ void CDashboard::Update()
       UpdateLabel("halt_lbl", "", clrBlack);
    }
 
-   // === NEWS SECTION ===
+   // === NEWS SECTION (standalone box) ===
    if(m_newsManager != NULL)
    {
       string display = m_newsManager.GetNewsDisplayString();
@@ -300,21 +335,16 @@ void CDashboard::Update()
       UpdateLabel("news_line2", (numLines > 1 ? lines[1] : "---"), clrSilver);
       UpdateLabel("news_line3", (numLines > 2 ? lines[2] : "---"), clrSilver);
 
-      // Warning banner
+      // Warning banner — wraps across 2 lines so it never overflows the box
       string warning = m_newsManager.GetWarningMessage();
-      if(warning != "")
-      {
-         UpdateLabel("news_warning", warning, clrRed);
-      }
-      else
-      {
-         UpdateLabel("news_warning", "", clrBlack);
-      }
-
-      // Protection status
       string protStatus = m_newsManager.GetProtectionStatus();
+
       if(protStatus != "")
-         UpdateLabel("news_warning", protStatus, clrOrange);
+         UpdateWrappedLabel("news_warning", protStatus, clrOrange, 44);
+      else if(warning != "")
+         UpdateWrappedLabel("news_warning", warning, clrRed, 44);
+      else
+         UpdateWrappedLabel("news_warning", "", clrBlack, 44);
    }
 }
 
